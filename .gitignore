@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# runtime artifacts
+data/
+artifacts/
+outputs/
+tmp/
+*.log
+
+# gameplay / montage video (never commit)
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
+*.m4v
+*.DVR.mp4
+
+# model weights (do not redistribute; download separately)
+*.pt
+models/*
+!models/.gitkeep
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

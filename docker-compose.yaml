@@ -1,0 +1,84 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  frontend:
+    # React + Node UI:
+    # - today: live logs viewer for api/worker/redis
+    # - later: montage editor UI
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Only show containers for this project.
+      - CONTAINER_NAME_PREFIX=valorant-montage-bot-
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_BROKER_URL=redis://redis:6379/0
+      - REDIS_BACKEND_URL=redis://redis:6379/1
+      - STORAGE_DIR=/data
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./models:/app/models
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_BROKER_URL=redis://redis:6379/0
+      - REDIS_BACKEND_URL=redis://redis:6379/1
+      - STORAGE_DIR=/data
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    command: ["celery", "-A", "src.worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
+    volumes:
+      - ./data:/data
+      - ./models:/app/models
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_BROKER_URL=redis://redis:6379/0
+      - REDIS_BACKEND_URL=redis://redis:6379/1
+    command: ["celery", "-A", "src.worker.celery_app:celery_app", "flower", "--port=5555"]
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis

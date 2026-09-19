@@ -1,0 +1,1 @@
+"""Audio effects package."""
