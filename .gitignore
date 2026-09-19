@@ -27,6 +27,14 @@ tmp/
 models/*
 !models/.gitkeep
 
+# local media / dumps (never commit)
+*.mp3
+*.wav
+*.flac
+*.ogg
+codebase_dump.txt
+editing_sfx/
+
 # OS / IDE
 .DS_Store
 .idea/
