@@ -8,7 +8,21 @@ output:
   codec: "h264_nvenc"
 
 effects:
-  pipeline_order: ["velocity", "zoom", "shake", "color_grading"]
+  pipeline_order:
+    - velocity
+    - freeze_frame
+    - zoom
+    - shake
+    - motion_blur
+    - scope_vignette
+    - death_pip
+    - highlight_bloom
+    - light_wrap
+    - impact_stylize
+    - lens_distort
+    - rgb_split
+    - letterbox
+    - color_grading
 
   velocity:
     enabled: true
@@ -19,8 +33,9 @@ effects:
 
   zoom:
     enabled: true
-    max_zoom: 1.25
-    duration_sec: 0.3
+    max_zoom: 1.32
+    duration_sec: 0.45
+    crash_in_frac: 0.35
     easing: "ease_out_quad"
     center: "screen_center"
 
@@ -37,14 +52,79 @@ effects:
     brightness: 0.02
     lut_file: null
 
+  scope_vignette:
+    enabled: false
+    duration_sec: 0.55
+    inner_radius: 0.28
+    darkness: 0.88
+    flash_scope: true
+
+  death_pip:
+    enabled: false
+    duration_sec: 0.95
+    scale: 2.6
+    size_frac: 0.36
+    margin_frac: 0.025
+    border_px: 5
+    desaturate: 0.45
+
+  impact_stylize:
+    enabled: false
+    duration_sec: 0.45
+    edge_strength: 0.55
+    glow_strength: 0.35
+    brightness_pulse: 0.12
+
+  freeze_frame:
+    enabled: false
+    duration_sec: 0.08
+
+  motion_blur:
+    enabled: false
+    duration_sec: 0.25
+    amount_px: 28
+
+  letterbox:
+    enabled: false
+    bar_frac: 0.08
+    duration_sec: 1.2
+
+  lens_distort:
+    enabled: false
+    duration_sec: 0.35
+    strength: 0.18
+
+  rgb_split:
+    enabled: false
+    duration_sec: 0.18
+    offset_px: 4
+
+  highlight_bloom:
+    enabled: false
+    duration_sec: 0.55
+    luma_threshold: 0.62
+    blur_px: 18
+    intensity: 0.85
+    weapon_bias: 0.35
+
+  light_wrap:
+    enabled: false
+    duration_sec: 0.4
+    radius: 0.55
+    intensity: 0.28
+
 transitions:
   enabled: true
   default_type: "hard_cut"
   beat_drop_type: "flash_white"
-  chorus_type: "dissolve"
+  chorus_type: "whip_pan"
   verse_type: "hard_cut"
   flash_duration_sec: 0.05
   xfade_duration_sec: 0.2
+  whip_duration_sec: 0.14
+  push_duration_sec: 0.12
+  whoosh_sfx_path: "assets/sfx/whoosh.wav"
+  whoosh_gain_db: -10
 
 audio:
   mixing:

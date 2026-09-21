@@ -5,7 +5,22 @@ from dataclasses import dataclass
 from typing import Literal
 
 from src.ai.schema import CreativeBrief, ScriptClipEffects
-from src.config.models import ColorGradingEffectConfig, ShakeEffectConfig, VelocityEffectConfig, ZoomEffectConfig
+from src.config.models import (
+    ColorGradingEffectConfig,
+    DeathPipEffectConfig,
+    FreezeFrameEffectConfig,
+    HighlightBloomEffectConfig,
+    ImpactStylizeEffectConfig,
+    LensDistortEffectConfig,
+    LetterboxEffectConfig,
+    LightWrapEffectConfig,
+    MotionBlurEffectConfig,
+    RgbSplitEffectConfig,
+    ScopeVignetteEffectConfig,
+    ShakeEffectConfig,
+    VelocityEffectConfig,
+    ZoomEffectConfig,
+)
 from src.effects.presets.valorant import get_preset
 
 # Per-clip treatment vocabulary. Uniform effects on every kill read as
@@ -13,15 +28,13 @@ from src.effects.presets.valorant import get_preset
 #   clean:     beat-retimed hard cut. No zoom, no shake, no slowmo.
 #   punch:     zoom punch-in on the kill. No slowmo, no shake.
 #   slow:      slowmo through the kill. No zoom, no shake.
-#   cinematic: full treatment (slowmo + zoom + shake). Reserved for the best moments.
+#   cinematic: full Zeeshu treatment (slowmo + overlays). Cap 2-3 clips.
 Recipe = Literal["clean", "punch", "slow", "cinematic"]
 
 VALID_RECIPES: tuple[str, ...] = ("clean", "punch", "slow", "cinematic")
 
-# At most this fraction of clips may zoom (punch + cinematic combined).
 ZOOM_BUDGET_FRACTION: float = 0.4
-
-# At most this many clips get the full cinematic treatment.
+# Heavy overlays (scope/PiP/stylize/etc.) only on cinematic clips.
 MAX_CINEMATIC: int = 3
 
 
@@ -44,31 +57,34 @@ def assign_recipes(
     phases: list[str],
     directed: dict[int, str] | None = None,
 ) -> list[str]:
-    """Assign a per-clip effect recipe with variety and an effect budget.
-
-    ``directed`` holds AI-director (Gemini) choices per clip index; they are
-    honored first, then the budget rules fill the rest deterministically.
-    """
+    """Assign recipes with a hard cinematic overlay budget of 2–3 clips."""
     n = len(scores)
     if n == 0:
         return []
 
     recipes: list[str | None] = [None] * n
-
-    # 1. Director choices win (subject to the cinematic cap below).
     for i, r in (directed or {}).items():
         if 0 <= i < n and r in VALID_RECIPES:
             recipes[i] = r
 
-    # 2. Highest-scored undirected kill gets cinematic if the cap allows.
-    cine_used = sum(1 for r in recipes if r == "cinematic")
-    if cine_used < MAX_CINEMATIC:
-        best = max((i for i in range(n) if recipes[i] is None), key=lambda i: scores[i], default=None)
-        if best is not None:
-            recipes[best] = "cinematic"
-            cine_used += 1
+    # Rank undirected clips: climax phase first, then score.
+    undirected = [i for i in range(n) if recipes[i] is None]
+    undirected.sort(
+        key=lambda i: (
+            1 if (phases[i] if i < len(phases) else "") == "climax" else 0,
+            scores[i],
+        ),
+        reverse=True,
+    )
 
-    # 3. Fill the rest by phase with alternation so no treatment repeats 3x.
+    cine_count = sum(1 for r in recipes if r == "cinematic")
+    target_cine = min(MAX_CINEMATIC, max(2, min(3, n // 4 + 1)) if n >= 4 else min(MAX_CINEMATIC, n))
+    for i in undirected:
+        if cine_count >= target_cine:
+            break
+        recipes[i] = "cinematic"
+        cine_count += 1
+
     alt = 0
     for i in range(n):
         if recipes[i] is not None:
@@ -80,24 +96,33 @@ def assign_recipes(
             recipes[i] = "slow"
         elif phase == "build":
             recipes[i] = "clean" if alt % 3 != 2 else "punch"
-        else:  # intro
+        else:
             recipes[i] = "clean"
         alt += 1
 
-    # 4. Enforce cinematic cap and zoom budget (director choices included:
-    # a budget the director can bypass is not a budget).
     final: list[str] = [str(r) for r in recipes]
     cine_idx = [i for i, r in enumerate(final) if r == "cinematic"]
-    for i in sorted(cine_idx, key=lambda i: scores[i])[: max(0, len(cine_idx) - MAX_CINEMATIC)]:
-        final[i] = "slow"
+    if len(cine_idx) > MAX_CINEMATIC:
+        for i in sorted(cine_idx, key=lambda i: scores[i])[: len(cine_idx) - MAX_CINEMATIC]:
+            final[i] = "slow"
 
     zoom_budget = max(1, math.ceil(ZOOM_BUDGET_FRACTION * n))
     zoom_idx = [i for i, r in enumerate(final) if r in ("punch", "cinematic")]
     if len(zoom_idx) > zoom_budget:
-        # Demote lowest-scored zooming clips first; cinematic survives longest.
         demotable = sorted(zoom_idx, key=lambda i: (final[i] == "cinematic", scores[i]))
         for i in demotable[: len(zoom_idx) - zoom_budget]:
-            final[i] = "slow" if final[i] == "cinematic" else "clean"
+            if final[i] == "cinematic":
+                # Never demote cinematic below MAX — demote punch instead when possible.
+                continue
+            final[i] = "clean"
+        zoom_idx = [i for i, r in enumerate(final) if r in ("punch", "cinematic")]
+        if len(zoom_idx) > zoom_budget:
+            demotable = sorted(
+                [i for i in zoom_idx if final[i] != "cinematic"],
+                key=lambda i: scores[i],
+            )
+            for i in demotable[: max(0, len(zoom_idx) - zoom_budget)]:
+                final[i] = "clean"
 
     return final
 
@@ -117,8 +142,6 @@ def map_effects(
     shake_keys = set(ShakeEffectConfig.model_fields) - {"enabled"}
     color_keys = set(ColorGradingEffectConfig.model_fields) - {"enabled"}
 
-    # Velocity is ALWAYS enabled: it performs the beat retiming that puts the
-    # kill on the accent. Recipes only control whether it adds a slowmo dip.
     vel_params = {k: v for k, v in preset.velocity.items() if k in vel_keys}
     if recipe in ("clean", "punch"):
         vel_params["kill_slowmo_duration_sec"] = 0.0
@@ -126,9 +149,12 @@ def map_effects(
 
     zoom = None
     if recipe in ("punch", "cinematic"):
-        zoom = ZoomEffectConfig.model_validate(
-            {"enabled": True, **{k: v for k, v in preset.zoom.items() if k in zoom_keys}}
-        )
+        zparams = {k: v for k, v in preset.zoom.items() if k in zoom_keys}
+        if recipe == "cinematic":
+            zparams.setdefault("max_zoom", 1.35)
+            zparams.setdefault("duration_sec", 0.5)
+            zparams.setdefault("crash_in_frac", 0.35)
+        zoom = ZoomEffectConfig.model_validate({"enabled": True, **zparams})
 
     shake = None
     if recipe == "cinematic":
@@ -140,9 +166,21 @@ def map_effects(
         {"enabled": True, **{k: v for k, v in preset.color_grading.items() if k in color_keys}}
     )
 
+    # Heavy Zeeshu overlays: cinematic only (budget 2-3 clips).
+    heavy = recipe == "cinematic"
     return ScriptClipEffects(
         velocity=velocity,
         zoom=zoom,
         shake=shake,
         color_grading=color_grading,
+        scope_vignette=ScopeVignetteEffectConfig(enabled=heavy) if heavy else None,
+        death_pip=DeathPipEffectConfig(enabled=heavy) if heavy else None,
+        impact_stylize=ImpactStylizeEffectConfig(enabled=heavy) if heavy else None,
+        freeze_frame=FreezeFrameEffectConfig(enabled=heavy) if heavy else None,
+        motion_blur=MotionBlurEffectConfig(enabled=heavy) if heavy else None,
+        letterbox=LetterboxEffectConfig(enabled=heavy) if heavy else None,
+        lens_distort=LensDistortEffectConfig(enabled=heavy) if heavy else None,
+        rgb_split=RgbSplitEffectConfig(enabled=heavy) if heavy else None,
+        highlight_bloom=HighlightBloomEffectConfig(enabled=heavy) if heavy else None,
+        light_wrap=LightWrapEffectConfig(enabled=heavy) if heavy else None,
     )

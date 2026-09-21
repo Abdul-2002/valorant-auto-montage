@@ -4,7 +4,22 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from src.config.models import ColorGradingEffectConfig, ShakeEffectConfig, VelocityEffectConfig, ZoomEffectConfig
+from src.config.models import (
+    ColorGradingEffectConfig,
+    DeathPipEffectConfig,
+    FreezeFrameEffectConfig,
+    HighlightBloomEffectConfig,
+    ImpactStylizeEffectConfig,
+    LensDistortEffectConfig,
+    LetterboxEffectConfig,
+    LightWrapEffectConfig,
+    MotionBlurEffectConfig,
+    RgbSplitEffectConfig,
+    ScopeVignetteEffectConfig,
+    ShakeEffectConfig,
+    VelocityEffectConfig,
+    ZoomEffectConfig,
+)
 
 
 class NarrativePhase(BaseModel):
@@ -105,6 +120,16 @@ class ScriptClipEffects(BaseModel):
     zoom: Optional[ZoomEffectConfig] = None
     shake: Optional[ShakeEffectConfig] = None
     color_grading: Optional[ColorGradingEffectConfig] = None
+    scope_vignette: Optional[ScopeVignetteEffectConfig] = None
+    death_pip: Optional[DeathPipEffectConfig] = None
+    impact_stylize: Optional[ImpactStylizeEffectConfig] = None
+    freeze_frame: Optional[FreezeFrameEffectConfig] = None
+    motion_blur: Optional[MotionBlurEffectConfig] = None
+    letterbox: Optional[LetterboxEffectConfig] = None
+    lens_distort: Optional[LensDistortEffectConfig] = None
+    rgb_split: Optional[RgbSplitEffectConfig] = None
+    highlight_bloom: Optional[HighlightBloomEffectConfig] = None
+    light_wrap: Optional[LightWrapEffectConfig] = None
 
 
 class ScriptClip(BaseModel):

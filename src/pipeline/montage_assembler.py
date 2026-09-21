@@ -385,20 +385,44 @@ def render_montage(
         # CRITICAL: every transition must preserve the output timeline exactly.
         # Inserting flash frames or overlapping clips shifts all subsequent cuts off
         # the music beat grid (the audio runs on an absolute timeline). Flash
-        # transitions are rendered as a tint on the head of the next clip; anything
-        # else is a hard cut.
-        flash_dur = max(0.02, float(config.transitions.flash_duration_sec))
-        styled: list[Any] = [clips[0]]
-        for idx, nxt in enumerate(clips[1:], start=0):
-            if script is not None and idx < len(script.clips) and script.clips[idx].transition_to_next is not None:
-                t_name = str(script.clips[idx].transition_to_next.type)
-            else:
-                t_name = config.transitions.default_type if config.transitions.enabled else "hard_cut"
+        # transitions are rendered as a tint on the head of the next clip; whip/push
+        # are duration-preserving motion styles on clip tails/heads.
+        from src.effects.transitions.motion_style import style_push_head, style_whip_head, style_whip_tail
 
-            if t_name == "flash_white":
-                nxt = _tint_head(nxt, color=(255, 255, 255), duration_sec=flash_dur)
-            elif t_name == "flash_black":
-                nxt = _tint_head(nxt, color=(0, 0, 0), duration_sec=flash_dur)
+        flash_dur = max(0.02, float(config.transitions.flash_duration_sec))
+        whip_dur = max(0.05, float(getattr(config.transitions, "whip_duration_sec", 0.14) or 0.14))
+        push_dur = max(0.05, float(getattr(config.transitions, "push_duration_sec", 0.12) or 0.12))
+        whoosh_times_sec: list[float] = []
+        styled: list[Any] = []
+        for idx, clip in enumerate(clips):
+            nxt = clip
+            if idx > 0:
+                prev_idx = idx - 1
+                if script is not None and prev_idx < len(script.clips) and script.clips[prev_idx].transition_to_next is not None:
+                    t_name = str(script.clips[prev_idx].transition_to_next.type)
+                else:
+                    t_name = config.transitions.default_type if config.transitions.enabled else "hard_cut"
+
+                if t_name == "flash_white":
+                    nxt = _tint_head(nxt, color=(255, 255, 255), duration_sec=flash_dur)
+                elif t_name == "flash_black":
+                    nxt = _tint_head(nxt, color=(0, 0, 0), duration_sec=flash_dur)
+                elif t_name == "whip_pan":
+                    nxt = style_whip_head(nxt, duration_sec=whip_dur)
+                    whoosh_times_sec.append(sum(float(getattr(c, "duration", 0.0) or 0.0) for c in styled))
+                elif t_name == "push":
+                    nxt = style_push_head(nxt, duration_sec=push_dur)
+
+            # Style whip on the outgoing tail before appending, when this clip
+            # transitions via whip_pan to the next.
+            if idx < len(clips) - 1:
+                if script is not None and idx < len(script.clips) and script.clips[idx].transition_to_next is not None:
+                    t_out = str(script.clips[idx].transition_to_next.type)
+                else:
+                    t_out = config.transitions.default_type if config.transitions.enabled else "hard_cut"
+                if t_out == "whip_pan":
+                    nxt = style_whip_tail(nxt, duration_sec=whip_dur)
+
             styled.append(nxt)
 
         assembled = concatenate_videoclips(styled, method="compose")
@@ -451,6 +475,25 @@ def render_montage(
         audio_pack = get_audio_effect("audio_mixing").from_config(mix_cfg).apply(audio_pack, audio_ctx)
         bass_cfg = config.audio.bass_boost.model_dump(mode="json")
         audio_pack = get_audio_effect("bass_boost").from_config(bass_cfg).apply(audio_pack, audio_ctx)
+
+        # Optional whoosh SFX on whip transitions (skip silently if asset missing).
+        mixed = audio_pack.get("mixed")
+        whoosh_path = getattr(config.transitions, "whoosh_sfx_path", None)
+        if mixed is not None and whoosh_times_sec and whoosh_path:
+            wp = Path(str(whoosh_path))
+            if not wp.is_file():
+                wp = Path(__file__).resolve().parents[2] / str(whoosh_path)
+            if wp.is_file():
+                try:
+                    whoosh = load_audio_segment(wp)
+                    gain = float(getattr(config.transitions, "whoosh_gain_db", -10.0) or -10.0)
+                    whoosh = whoosh + gain
+                    for t_sec in whoosh_times_sec:
+                        pos = max(0, int(float(t_sec) * 1000))
+                        mixed = mixed.overlay(whoosh, position=pos)
+                    audio_pack["mixed"] = mixed
+                except Exception:
+                    logger.exception("assembler: whoosh overlay failed; continuing without whoosh")
 
         if audio_pack.get("mixed") is not None:
             tmp_audio = out_dir / "mixed_audio.mp3"

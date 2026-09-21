@@ -154,12 +154,28 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
 
     # Beat-driven output layout: assign each clip an output slot on the music beat grid.
     pacing = float(inp.creative_config_resolved.get("pacing", 0.8))
+    # Prefer starting the montage in a high-energy music section (chorus/drop)
+    # so climax overlays land on the song's real accents, not the intro.
+    start_beat = 0
+    if inp.beat_map is not None and getattr(inp.beat_map, "sections", None) and inp.beat_map.beat_times:
+        beats = list(inp.beat_map.beat_times)
+        for sec in inp.beat_map.sections:
+            if str(sec.section_type) in ("drop", "chorus"):
+                t0 = float(sec.start_sec)
+                # First beat at or after section start.
+                for bi, b in enumerate(beats):
+                    if float(b) >= t0:
+                        start_beat = bi
+                        break
+                break
+
     layout = layout_clips_on_beats(
         beat_map=inp.beat_map,
         num_clips=len(clips),
         pacing=pacing,
         target_duration_sec=inp.target_duration_sec,
         max_slot_sec=3.75,
+        start_at_beat_index=start_beat,
     )
     clip_output_starts = [float(s.output_start_sec) for s in layout.slots]
 

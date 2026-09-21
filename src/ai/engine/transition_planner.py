@@ -79,17 +79,24 @@ def plan_transitions(
             is_downbeat = (bi is not None) and (bi % 4 == 0)
             stype = _section_type_at(beat_map, boundary_t)
 
-            # Verse/intro/outro: prefer softer crossfades.
-            if stype in ("verse", "intro", "outro"):
-                out.append(ScriptTransition(type="dissolve", duration_sec=0.2))
-            # Drops/chorus: accent downbeats with flash.
+            # Drops/chorus: whip pans and flashes for energy; verses stay clean.
+            if stype in ("verse", "intro"):
+                out.append(ScriptTransition(type="hard_cut", duration_sec=0.12))
             elif stype in ("drop", "chorus") and is_downbeat and flash_frequency > 0:
                 out.append(ScriptTransition(type="flash_white", duration_sec=0.05))
+            elif stype in ("drop", "chorus"):
+                out.append(ScriptTransition(type="whip_pan", duration_sec=0.14))
+            elif stype == "outro":
+                out.append(ScriptTransition(type="hard_cut", duration_sec=0.15))
+            elif (i + 1) % 5 == 0:
+                out.append(ScriptTransition(type="push", duration_sec=0.12))
             else:
                 out.append(ScriptTransition(type="hard_cut", duration_sec=0.15))
         else:
             if (i + 1) % max(1, k) == 0:
                 out.append(ScriptTransition(type="flash_white", duration_sec=0.05))
+            elif (i + 1) % 4 == 0:
+                out.append(ScriptTransition(type="whip_pan", duration_sec=0.14))
             else:
                 out.append(ScriptTransition(type="hard_cut", duration_sec=0.15))
 

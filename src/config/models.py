@@ -26,6 +26,8 @@ class ZoomEffectConfig(BaseModel):
     enabled: bool = True
     max_zoom: float = Field(ge=1.0, le=3.0, default=1.25)
     duration_sec: float = Field(gt=0.01, lt=5.0, default=0.3)
+    # Fraction of the zoom window spent crashing IN (rest settles/zooms out).
+    crash_in_frac: float = Field(ge=0.15, le=0.85, default=0.35)
     easing: str = Field(default="ease_out_quad")
     center: Literal["screen_center", "kill_position"] = "screen_center"
 
@@ -45,22 +47,124 @@ class ColorGradingEffectConfig(BaseModel):
     lut_file: Optional[str] = None
 
 
+class ScopeVignetteEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=3.0, default=0.55)
+    inner_radius: float = Field(ge=0.1, le=0.9, default=0.28)
+    darkness: float = Field(ge=0.0, le=1.0, default=0.88)
+    flash_scope: bool = True
+
+
+class DeathPipEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.1, lt=2.5, default=0.95)
+    scale: float = Field(ge=1.2, le=4.0, default=2.6)
+    size_frac: float = Field(ge=0.15, le=0.5, default=0.36)
+    margin_frac: float = Field(ge=0.01, le=0.1, default=0.025)
+    border_px: int = Field(ge=0, le=16, default=5)
+    desaturate: float = Field(ge=0.0, le=1.0, default=0.45)
+
+
+class ImpactStylizeEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.45)
+    edge_strength: float = Field(ge=0.0, le=1.0, default=0.55)
+    glow_strength: float = Field(ge=0.0, le=1.0, default=0.35)
+    brightness_pulse: float = Field(ge=0.0, le=0.5, default=0.12)
+
+
+class FreezeFrameEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.02, lt=0.5, default=0.08)
+
+
+class MotionBlurEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=1.5, default=0.25)
+    amount_px: int = Field(ge=1, le=80, default=28)
+
+
+class LetterboxEffectConfig(BaseModel):
+    enabled: bool = False
+    bar_frac: float = Field(ge=0.02, le=0.2, default=0.08)
+    duration_sec: float = Field(gt=0.1, lt=5.0, default=1.2)
+
+
+class LensDistortEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=1.5, default=0.35)
+    strength: float = Field(ge=0.0, le=0.5, default=0.18)
+
+
+class RgbSplitEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.02, lt=1.0, default=0.18)
+    offset_px: int = Field(ge=1, le=20, default=4)
+
+
+class HighlightBloomEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.55)
+    luma_threshold: float = Field(ge=0.3, le=0.95, default=0.62)
+    blur_px: int = Field(ge=3, le=64, default=18)
+    intensity: float = Field(ge=0.0, le=2.0, default=0.85)
+    weapon_bias: float = Field(ge=0.0, le=1.0, default=0.35)
+
+
+class LightWrapEffectConfig(BaseModel):
+    enabled: bool = False
+    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.4)
+    radius: float = Field(ge=0.15, le=1.2, default=0.55)
+    intensity: float = Field(ge=0.0, le=1.0, default=0.28)
+
+
 class EffectsConfig(BaseModel):
-    pipeline_order: list[str] = Field(default_factory=lambda: ["velocity", "zoom", "shake", "color_grading"])
+    pipeline_order: list[str] = Field(
+        default_factory=lambda: [
+            "velocity",
+            "freeze_frame",
+            "zoom",
+            "shake",
+            "motion_blur",
+            "scope_vignette",
+            "death_pip",
+            "highlight_bloom",
+            "light_wrap",
+            "impact_stylize",
+            "lens_distort",
+            "rgb_split",
+            "letterbox",
+            "color_grading",
+        ]
+    )
     velocity: VelocityEffectConfig = Field(default_factory=VelocityEffectConfig)
     zoom: ZoomEffectConfig = Field(default_factory=ZoomEffectConfig)
     shake: ShakeEffectConfig = Field(default_factory=ShakeEffectConfig)
     color_grading: ColorGradingEffectConfig = Field(default_factory=ColorGradingEffectConfig)
+    scope_vignette: ScopeVignetteEffectConfig = Field(default_factory=ScopeVignetteEffectConfig)
+    death_pip: DeathPipEffectConfig = Field(default_factory=DeathPipEffectConfig)
+    impact_stylize: ImpactStylizeEffectConfig = Field(default_factory=ImpactStylizeEffectConfig)
+    freeze_frame: FreezeFrameEffectConfig = Field(default_factory=FreezeFrameEffectConfig)
+    motion_blur: MotionBlurEffectConfig = Field(default_factory=MotionBlurEffectConfig)
+    letterbox: LetterboxEffectConfig = Field(default_factory=LetterboxEffectConfig)
+    lens_distort: LensDistortEffectConfig = Field(default_factory=LensDistortEffectConfig)
+    rgb_split: RgbSplitEffectConfig = Field(default_factory=RgbSplitEffectConfig)
+    highlight_bloom: HighlightBloomEffectConfig = Field(default_factory=HighlightBloomEffectConfig)
+    light_wrap: LightWrapEffectConfig = Field(default_factory=LightWrapEffectConfig)
 
 
 class TransitionsConfig(BaseModel):
     enabled: bool = True
     default_type: str = "hard_cut"
     beat_drop_type: str = "flash_white"
-    chorus_type: str = "dissolve"
+    chorus_type: str = "whip_pan"
     verse_type: str = "hard_cut"
     flash_duration_sec: float = Field(gt=0.0, lt=2.0, default=0.05)
     xfade_duration_sec: float = Field(gt=0.0, lt=5.0, default=0.2)
+    whip_duration_sec: float = Field(gt=0.05, lt=0.6, default=0.14)
+    push_duration_sec: float = Field(gt=0.05, lt=0.6, default=0.12)
+    whoosh_sfx_path: Optional[str] = "assets/sfx/whoosh.wav"
+    whoosh_gain_db: float = Field(ge=-60.0, le=24.0, default=-10.0)
 
 
 class AudioMixingConfig(BaseModel):

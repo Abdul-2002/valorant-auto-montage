@@ -31,18 +31,25 @@ def main() -> int:
     import argparse
 
     p = argparse.ArgumentParser(description="Local end-to-end montage pipeline")
-    p.add_argument("--video", required=True, type=Path, help="Gameplay video path")
+    p.add_argument(
+        "--video",
+        required=True,
+        type=Path,
+        nargs="+",
+        help="One or more gameplay video paths (multi-VOD montages supported)",
+    )
     p.add_argument("--music", required=True, type=Path, help="Music track path")
     p.add_argument("--out", type=Path, default=ROOT / "artifacts/local_pipeline_run", help="Output directory")
     p.add_argument("--config", type=Path, default=ROOT / "config/default.yaml")
     args = p.parse_args()
 
-    video = args.video.resolve()
+    videos = [v.resolve() for v in args.video]
     music = args.music.resolve()
     out = args.out.resolve()
-    if not video.is_file():
-        print(f"Video not found: {video}", file=sys.stderr)
-        return 1
+    for video in videos:
+        if not video.is_file():
+            print(f"Video not found: {video}", file=sys.stderr)
+            return 1
     if not music.is_file():
         print(f"Music not found: {music}", file=sys.stderr)
         return 1
@@ -51,8 +58,8 @@ def main() -> int:
     cfg_path = args.config if args.config.is_file() else ROOT / args.config
     config = load_config(cfg_path)
 
-    print("Phase: highlight detection (auto_gaming_yolo + audio_peaks)...", flush=True)
-    highlights = detect_highlights(video_paths=[video], config=config)
+    print(f"Phase: highlight detection ({len(videos)} video(s))...", flush=True)
+    highlights = detect_highlights(video_paths=videos, config=config)
     print(f"  -> {len(highlights)} events", flush=True)
 
     hl_json = [h.model_dump(mode="json") for h in highlights]
@@ -73,7 +80,7 @@ def main() -> int:
     brief = None
     try:
         events = [DetectedEvent.model_validate(x) for x in hl_json]
-        enriched, _durations = enrich_events(highlights=events, video_paths=[video])
+        enriched, _durations = enrich_events(highlights=events, video_paths=videos)
         creative_cfg = config.ai_director.creative_config.model_dump(mode="json")
         brief = safe_generate_brief(
             cfg=config.ai_director,
@@ -86,7 +93,7 @@ def main() -> int:
     print("Phase: compose script...", flush=True)
     script, _ = generate_montage_script(
         highlights=hl_json,
-        video_paths=[video],
+        video_paths=videos,
         config=config,
         beat_map=beat_map,
         brief=brief,
@@ -98,7 +105,7 @@ def main() -> int:
     render_out.mkdir(parents=True, exist_ok=True)
     print("Phase: render (MoviePy + ffmpeg)...", flush=True)
     render_montage(
-        video_paths=[video],
+        video_paths=videos,
         music_path=music,
         highlights=hl_json,
         config=config,
