@@ -150,6 +150,8 @@ class ScriptClip(BaseModel):
     pre_kill_speed: Optional[float] = Field(default=None, gt=0.0, le=10.0)
     post_kill_speed: Optional[float] = Field(default=None, gt=0.0, le=10.0)
     kill_output_time_sec: Optional[float] = Field(default=None, ge=0.0)
+    # True when this kill is placed on a drop: hold the pre-kill frame, then release on the accent.
+    beat_drop_hold: bool = False
     effects: ScriptClipEffects = Field(default_factory=ScriptClipEffects)
     transition_to_next: Optional[ScriptTransition] = None
     arc_phase: Literal["intro", "build", "climax", "outro"] = "build"

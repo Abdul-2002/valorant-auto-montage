@@ -7,11 +7,9 @@ from typing import Literal
 from src.ai.schema import CreativeBrief, ScriptClipEffects
 from src.config.models import (
     ColorGradingEffectConfig,
-    DeathPipEffectConfig,
     FreezeFrameEffectConfig,
     HighlightBloomEffectConfig,
     ImpactStylizeEffectConfig,
-    LensDistortEffectConfig,
     LetterboxEffectConfig,
     LightWrapEffectConfig,
     MotionBlurEffectConfig,
@@ -174,12 +172,14 @@ def map_effects(
         shake=shake,
         color_grading=color_grading,
         scope_vignette=ScopeVignetteEffectConfig(enabled=heavy) if heavy else None,
-        death_pip=DeathPipEffectConfig(enabled=heavy) if heavy else None,
+        # Same-frame corner inset duplicates the kill. Zishu stays first-person.
+        death_pip=None,
         impact_stylize=ImpactStylizeEffectConfig(enabled=heavy) if heavy else None,
         freeze_frame=FreezeFrameEffectConfig(enabled=heavy) if heavy else None,
         motion_blur=MotionBlurEffectConfig(enabled=heavy) if heavy else None,
         letterbox=LetterboxEffectConfig(enabled=heavy) if heavy else None,
-        lens_distort=LensDistortEffectConfig(enabled=heavy) if heavy else None,
+        # Reflect border mirrors HUD and any overlay. Not part of the first-person look.
+        lens_distort=None,
         rgb_split=RgbSplitEffectConfig(enabled=heavy) if heavy else None,
         highlight_bloom=HighlightBloomEffectConfig(enabled=heavy) if heavy else None,
         light_wrap=LightWrapEffectConfig(enabled=heavy) if heavy else None,

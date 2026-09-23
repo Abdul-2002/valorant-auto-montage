@@ -334,6 +334,7 @@ def render_montage(
                 kout = getattr(sc, "kill_output_time_sec", None)
                 if kout is not None:
                     beat_ts = float(kout)
+                clip_config["_beat_drop_hold"] = bool(getattr(sc, "beat_drop_hold", False))
 
             ctx = EffectContext(
                 clip=vclip,

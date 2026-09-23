@@ -71,6 +71,51 @@ def _snap_accent_to_nearest_beat_in_slot(
     return snapped, was_close
 
 
+_MAX_DROP_HOLDS = 4
+
+
+def _mark_beat_drop_holds(clips: list[ScriptClip], beat_map: BeatMap | None) -> list[ScriptClip]:
+    """Hold the pre-kill frame on the strongest accents. Section label 'drop' is not enough.
+
+    The energy detector often calls the first chorus 'chorus' and only tags a late
+    peak as 'drop', which this montage never reaches.
+    """
+    if beat_map is None:
+        return clips
+    times = [float(x) for x in (beat_map.beat_times or [])]
+    strengths = [float(x) for x in (getattr(beat_map, "beat_strengths", None) or [])]
+    use_strength = bool(times) and len(times) == len(strengths)
+    scored: list[tuple[float, int]] = []
+    for i, clip in enumerate(clips):
+        accent = clip.kill_output_time_sec
+        if accent is None:
+            continue
+        strength = 0.0
+        if use_strength:
+            nearest = min(range(len(times)), key=lambda j: abs(times[j] - float(accent)))
+            if abs(times[nearest] - float(accent)) <= 0.35:
+                strength = strengths[nearest]
+        for sec in beat_map.sections or []:
+            in_section = float(sec.start_sec) <= float(accent) < float(sec.end_sec)
+            if in_section and str(sec.section_type) == "drop":
+                strength = max(strength, 1.0)
+        if strength > 0.0:
+            scored.append((strength, i))
+    if not scored:
+        return clips
+    scored.sort(reverse=True)
+    top = scored[0][0]
+    floor = max(0.7, top * 0.85)
+    chosen = [i for strength, i in scored if strength >= floor][:_MAX_DROP_HOLDS]
+    if not chosen:
+        chosen = [i for _, i in scored[: min(2, _MAX_DROP_HOLDS)]]
+    chosen_set = set(chosen)
+    return [
+        c.model_copy(update={"beat_drop_hold": i in chosen_set}) if i in chosen_set else c
+        for i, c in enumerate(clips)
+    ]
+
+
 @dataclass(frozen=True)
 class ComposeInputs:
     enriched_events: list[EnrichedEvent]
@@ -331,6 +376,7 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         BEAT_SNAP_TOLERANCE_SEC,
         snap_close_count,
     )
+    clips = _mark_beat_drop_holds(clips, inp.beat_map)
 
     # Sanity-check total output duration before committing the script.
     total_output = sum(
