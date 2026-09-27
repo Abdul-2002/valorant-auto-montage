@@ -18,7 +18,8 @@ class EffectContext:
     fps: int
     resolution: tuple[int, int]
     config: dict[str, Any]
-    # Seconds on the output / music timeline (post script phase trim), for audio effects.
+    # Clip effects: every kill of the clip in output seconds relative to the clip start.
+    # Audio effects: kill times on the montage timeline (post script phase trim).
     kill_timestamps: tuple[float, ...] = ()
 
 

@@ -26,6 +26,7 @@ class _GeminiTreatment(BaseModel):
 
     event_idx: int = Field(ge=0)
     recipe: Literal["clean", "punch", "slow", "cinematic"]
+    hit_style: Literal["flash_blur", "glow", "flash_shake"] = "flash_blur"
     note: str = ""
 
 
@@ -59,7 +60,8 @@ def _to_creative_brief(g: _GeminiBrief) -> CreativeBrief:
         effect_biases=g.effect_biases,
         transition_strategy=g.transition_strategy,
         special_treatments=[
-            SpecialTreatment(event_idx=t.event_idx, note=t.note, treatment=t.recipe) for t in g.treatments
+            SpecialTreatment(event_idx=t.event_idx, note=t.note, treatment=t.recipe, hit_style=t.hit_style)
+            for t in g.treatments
         ],
         reasoning=g.reasoning,
         intensity_bias=g.intensity_bias,

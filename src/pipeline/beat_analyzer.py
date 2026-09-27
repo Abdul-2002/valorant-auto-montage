@@ -26,6 +26,8 @@ class BeatMap:
     # The perceptual accents of a song (claps, snares) are the high-strength
     # beats; kill moments must land on these, not on weak off-beats.
     beat_strengths: list[float] = field(default_factory=list)
+    # Seconds per RMS frame (hop_length / sr); 0.0 when unknown.
+    rms_frame_sec: float = 0.0
 
 
 def _rms_times(*, num_frames: int, sr: int, hop_length: int) -> list[float]:
@@ -112,27 +114,33 @@ def _detect_sections(times: list[float], energy: list[float]) -> list[BeatSectio
     return sections
 
 
-def _beat_strengths(y: np.ndarray, sr: int, beat_times: list[float], hop_length: int = 512) -> list[float]:
-    """Normalized onset-envelope strength at each beat time.
+_STRENGTH_NORM_PERCENTILE = 98.0
 
-    Sampling max over a +/-1 frame window absorbs sub-frame beat placement
-    error from the tracker.
+
+def _beat_strengths(y: np.ndarray, sr: int, beat_times: list[float], hop_length: int = 512) -> list[float]:
+    """Percussive onset strength at each beat, normalized to 0..1.
+
+    Harmonic content (vocals, pads) is removed first so claps/snares/kicks
+    dominate the envelope. Normalizing by a high percentile instead of the
+    single loudest onset keeps one spike from flattening every other accent.
+    Sampling max over a +/-1 frame window absorbs sub-frame tracker error.
     """
     if not beat_times:
         return []
-    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    percussive = librosa.effects.percussive(y, margin=2.0)
+    env = librosa.onset.onset_strength(y=percussive, sr=sr, hop_length=hop_length)
     if env.size == 0:
         return [0.0] * len(beat_times)
     frames = np.atleast_1d(librosa.time_to_frames(np.asarray(beat_times), sr=sr, hop_length=hop_length))
-    out: list[float] = []
+    raw: list[float] = []
     for f in frames.tolist():
         a = max(0, int(f) - 1)
         b = min(int(env.size), int(f) + 2)
-        out.append(float(np.max(env[a:b])) if b > a else 0.0)
-    peak = max(out)
-    if peak <= 0.0:
-        return [0.0] * len(out)
-    return [v / peak for v in out]
+        raw.append(float(np.max(env[a:b])) if b > a else 0.0)
+    ref = float(np.percentile(raw, _STRENGTH_NORM_PERCENTILE))
+    if ref <= 0.0:
+        return [0.0] * len(raw)
+    return [min(1.0, v / ref) for v in raw]
 
 
 def analyze_beats(audio_path: Path, *, start_bpm: float = 120.0, tightness: int = 100) -> BeatMap:
@@ -159,4 +167,5 @@ def analyze_beats(audio_path: Path, *, start_bpm: float = 120.0, tightness: int 
         rms=[float(x) for x in rms.tolist()],
         sections=sections,
         beat_strengths=strengths,
+        rms_frame_sec=float(hop_length) / float(sr),
     )

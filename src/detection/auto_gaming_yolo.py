@@ -18,6 +18,41 @@ def _norm_name(name: str) -> str:
     return "".join(str(name).lower().split())
 
 
+def dedupe_kill_detections(
+    detections: list[dict[str, Any]],
+    *,
+    gap_sec: float,
+) -> list[dict[str, Any]]:
+    """Collapse near-duplicate kill stamps (e.g. kill-1/kill-2 flicker on one frag).
+
+    Keeps the higher-confidence event inside each gap window, per video_index.
+    """
+    if gap_sec <= 0.0 or len(detections) <= 1:
+        return list(detections)
+
+    kills = [d for d in detections if str(d.get("event_type", "kill")) == "kill"]
+    other = [d for d in detections if str(d.get("event_type", "kill")) != "kill"]
+    kills.sort(key=lambda d: (int(d.get("video_index", 0)), float(d["timestamp_sec"])))
+
+    kept: list[dict[str, Any]] = []
+    for det in kills:
+        if not kept:
+            kept.append(det)
+            continue
+        prev = kept[-1]
+        same_video = int(prev.get("video_index", 0)) == int(det.get("video_index", 0))
+        close = abs(float(det["timestamp_sec"]) - float(prev["timestamp_sec"])) <= float(gap_sec)
+        if same_video and close:
+            if float(det.get("score", 0.0)) > float(prev.get("score", 0.0)):
+                kept[-1] = det
+            continue
+        kept.append(det)
+
+    out = kept + other
+    out.sort(key=lambda d: (int(d.get("video_index", 0)), float(d["timestamp_sec"])))
+    return out
+
+
 @register_detector("auto_gaming_yolo")
 @dataclass
 class AutoGamingYoloDetector(Detector):
@@ -30,6 +65,10 @@ class AutoGamingYoloDetector(Detector):
     hysteresis, then refine each event to the exact appearance frame at full
     framerate and subtract the killfeed UI latency so the timestamp points at
     the frag itself.
+
+    kill-1..kill-6 are separate YOLO classes for the same feed icons, so a
+    global kill re-emit guard + post-pass gap merge is required — per-class
+    rising edges alone double-fire the same frag as kill-1 then kill-2.
     """
 
     model_path: str = "models/auto_gaming_valorant.pt"
@@ -40,9 +79,10 @@ class AutoGamingYoloDetector(Detector):
     # (lower) confidence, suppressing re-emissions from conf flicker around
     # the emission threshold.
     presence_conf: float = 0.3
-    # Minimum gap before the same raw class may fire again (guards against
-    # brief detection dropouts on a persistent killfeed row).
+    # Minimum gap before ANY kill class may fire again (cross-class).
     reemit_guard_sec: float = 1.5
+    # Merge remaining near-duplicates after refine (kill-1/kill-2 flicker).
+    kill_dedupe_gap_sec: float = 1.0
     # The killfeed row appears after the actual frag; shift timestamps back
     # so beat-synced accents land on the kill, not the UI notification.
     killfeed_latency_sec: float = 0.35
@@ -148,7 +188,7 @@ class AutoGamingYoloDetector(Detector):
         # Pass 1: sampled scan, emit on rising edges only.
         candidates: list[dict[str, Any]] = []
         prev_present: set[str] = set()
-        last_emit_by_raw: dict[str, float] = {}
+        last_kill_emit_sec: float | None = None
         frame_idx = 0
         try:
             while True:
@@ -161,16 +201,23 @@ class AutoGamingYoloDetector(Detector):
 
                 present = self._kill_classes_in_frame(model, frame)
                 t_sec = float(frame_idx / fps)
-                for raw, (conf, bbox) in present.items():
-                    if raw in prev_present or conf < float(self.confidence_threshold):
-                        continue
-                    last_t = last_emit_by_raw.get(raw)
-                    if last_t is not None and (t_sec - last_t) <= float(self.reemit_guard_sec):
-                        continue
-                    candidates.append(
-                        {"frame": frame_idx, "raw": raw, "conf": conf, "bbox": bbox}
+                # One emission per sampled frame even if multiple kill-* classes rise.
+                new_kills = [
+                    (raw, conf, bbox)
+                    for raw, (conf, bbox) in present.items()
+                    if raw not in prev_present and conf >= float(self.confidence_threshold)
+                ]
+                if new_kills:
+                    guarded = (
+                        last_kill_emit_sec is not None
+                        and (t_sec - last_kill_emit_sec) <= float(self.reemit_guard_sec)
                     )
-                    last_emit_by_raw[raw] = t_sec
+                    if not guarded:
+                        raw, conf, bbox = max(new_kills, key=lambda x: float(x[1]))
+                        candidates.append(
+                            {"frame": frame_idx, "raw": raw, "conf": conf, "bbox": bbox}
+                        )
+                        last_kill_emit_sec = t_sec
                 prev_present = set(present.keys())
                 frame_idx += 1
 
@@ -198,7 +245,16 @@ class AutoGamingYoloDetector(Detector):
                     "raw_class": str(cand["raw"]),
                 }
             )
+        before = len(detections)
+        detections = dedupe_kill_detections(
+            detections, gap_sec=float(self.kill_dedupe_gap_sec)
+        )
         detections.sort(key=lambda d: d["timestamp_sec"])
 
-        log.info("auto_gaming_yolo: events=%d video=%s", len(detections), ctx.video_path)
+        log.info(
+            "auto_gaming_yolo: events=%d (raw=%d) video=%s",
+            len(detections),
+            before,
+            ctx.video_path,
+        )
         return detections

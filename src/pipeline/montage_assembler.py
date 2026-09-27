@@ -269,14 +269,13 @@ def render_montage(
             vclip = _resized(vclip, w=w, h=h)
             clip_duration = float(getattr(vclip, "duration", None) or (sel.end_sec - sel.start_sec))
 
-            # Beat-synced output: if script provides an explicit speed factor, apply it so
-            # the clip's output duration matches its assigned beat slot in music time.
-            # When kill-on-beat alignment speeds are present, skip global speed (velocity handles it).
+            # Beat-synced output: scripts with time_knots are retimed by the velocity effect
+            # (every kill pinned to its beat); others fall back to a uniform speed_factor.
             has_aligned_speed = (
                 script is not None
                 and script.clips
                 and i < len(script.clips)
-                and getattr(script.clips[i], "pre_kill_speed", None) is not None
+                and bool(getattr(script.clips[i], "time_knots", None))
             )
 
             if script is not None and script.clips and i < len(script.clips):
@@ -317,24 +316,17 @@ def render_montage(
             else:
                 vclip = _with_duration(vclip, clip_duration)
 
-            # Build EffectContext, injecting pre/post kill speeds when available.
             clip_config = config.model_dump(mode="json")
             clip_config["_src_duration_sec"] = float(sel.end_sec) - float(sel.start_sec)
             beat_ts: float | None = None
+            kill_outs: tuple[float, ...] = ()
             if script is not None and script.clips and i < len(script.clips):
                 sc = script.clips[i]
-                if getattr(sc, "pre_kill_speed", None) is not None:
-                    clip_config["_pre_kill_speed"] = float(sc.pre_kill_speed)  # type: ignore[arg-type]
-                if getattr(sc, "post_kill_speed", None) is not None:
-                    clip_config["_post_kill_speed"] = float(sc.post_kill_speed)  # type: ignore[arg-type]
-                vel = getattr(sc.effects, "velocity", None) if sc.effects else None
-                if vel is not None:
-                    clip_config["_kill_slowmo_factor"] = float(vel.kill_slowmo_factor)
-                    clip_config["_kill_slowmo_duration_sec"] = float(vel.kill_slowmo_duration_sec)
-                kout = getattr(sc, "kill_output_time_sec", None)
-                if kout is not None:
-                    beat_ts = float(kout)
-                clip_config["_beat_drop_hold"] = bool(getattr(sc, "beat_drop_hold", False))
+                if sc.time_knots:
+                    clip_config["_time_knots"] = [list(k) for k in sc.time_knots]
+                kill_outs = tuple(float(k) for k in sc.kill_output_times_sec)
+                if kill_outs:
+                    beat_ts = kill_outs[-1]
 
             ctx = EffectContext(
                 clip=vclip,
@@ -344,7 +336,7 @@ def render_montage(
                 fps=fps,
                 resolution=(w, h),
                 config=clip_config,
-                kill_timestamps=(),
+                kill_timestamps=kill_outs,
             )
 
             # Apply clip effects in configured order.
@@ -443,11 +435,8 @@ def render_montage(
                 if out is None or end is None:
                     continue
                 span = max(1e-6, float(end) - float(out))
-                kout = c.kill_output_time_sec
-                if kout is not None:
-                    kill_times.append(float(out) + float(kout) - phase)
-                else:
-                    kill_times.append(float(out) + 0.5 * span - phase)
+                rel_kills = c.kill_output_times_sec or [0.5 * span]
+                kill_times.extend(float(out) + float(k) - phase for k in rel_kills)
 
         audio_ctx = EffectContext(
             clip=None,

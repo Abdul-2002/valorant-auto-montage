@@ -14,21 +14,27 @@ You will be given:
 - A style configuration (creative_config)
 
 You do NOT generate clip timestamps. You output a creative brief the engine executes.
+The engine always lands every kill exactly on a beat; you decide how each kill feels.
 
-DIRECTING PRINCIPLES (follow these; violating them produces amateur output):
-1. Effects are a BUDGET, not a default. Most kills should be "clean" (a beat-synced
-   hard cut with no ornament). Uniform effects on every kill look machine-generated.
-2. Per-kill treatments (the "treatments" list) use exactly these recipes:
-   - "clean": beat-retimed hard cut. The default. Use for most kills.
-   - "punch": quick zoom punch-in. Use sparingly for strong single kills.
-   - "slow": slow-motion through the kill. Use for graceful moments (flicks, wallbangs).
-   - "cinematic": slowmo + zoom + shake. Reserve for AT MOST 2-3 moments total:
+DIRECTING PRINCIPLES (Zishu-style Valorant edits):
+1. Every kill gets a hit on the beat. Pick a "hit_style" per kill and VARY them;
+   the same hit on every kill looks templated:
+   - "flash_blur": brightness flash + lens blur that decays (the Zishu default).
+   - "glow": bloom on bright pixels (skins, muzzle flash, abilities).
+   - "flash_shake": flash + short camera shake (heavy hits, shotguns, Operator).
+2. Per-kill "recipe" controls what happens after the hit:
+   - "slow": post-kill slow motion (knife pull / reload / unscope). The signature; use for most kills.
+   - "clean": hit only, keeps momentum. Use in fast stretches and quiet sections.
+   - "punch": hit + crash zoom, no slow-mo. Strong single kills in high-energy sections.
+   - "cinematic": slow-mo + zoom + shake + edge-glow stylize. AT MOST 2 per montage:
      the best multi-kill or the single highest-impact play.
-3. Match energy to the song: put the best kills (cinematic/punch) where the music
-   section energy is highest ("drop"/"chorus"). Low-energy sections get clean cuts.
-4. Multi-kill groups are prime content: never exclude them, and give the final
-   kill of the best group the cinematic treatment.
-5. Excluding kills shortens the montage. Only prefer_exclude genuinely weak events.
+3. Match energy to the song: cinematic/punch where section energy is highest
+   ("drop"/"chorus"); quieter sections get slow or clean.
+4. Kills 1-2s apart are cut as one multi-kill clip; give the LAST kill of the best
+   burst the cinematic treatment.
+5. "scoped": true means a sniper kill; the engine adds a scope mask automatically.
+   "flash_shake" suits scoped kills.
+6. Excluding kills shortens the montage. Only prefer_exclude genuinely weak events.
 
 Keep the reasoning field to 2-3 sentences describing your directorial intent."""
 
@@ -75,6 +81,7 @@ def build_user_prompt(*, enriched_events: list[EnrichedEvent], creative_config: 
                 "gap_prev_sec": e.gap_prev_sec,
                 "gap_next_sec": e.gap_next_sec,
                 "multi_kill_group_id": e.multi_kill_group_id,
+                "scoped": e.scoped,
             }
             for i, e in enumerate(events)
         ],

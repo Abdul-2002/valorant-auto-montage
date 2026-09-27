@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
-import cv2
 import numpy as np
 from moviepy.video.VideoClip import VideoClip
 
@@ -11,46 +11,56 @@ from src.effects.base import ClipEffect, EffectContext
 from src.effects.registry import register_clip_effect
 
 
+@lru_cache(maxsize=4)
+def _radial_distance(h: int, w: int) -> np.ndarray:
+    """Distance from screen center in half-height units (circle, not aspect ellipse)."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    half = max(1.0, h / 2.0)
+    return np.sqrt(((xx - w / 2.0) / half) ** 2 + ((yy - h / 2.0) / half) ** 2)
+
+
+def _ease_out(u: float) -> float:
+    u = min(1.0, max(0.0, u))
+    return 1.0 - (1.0 - u) ** 3
+
+
 @register_clip_effect("scope_vignette")
 @dataclass
 class ScopeVignetteEffect(ClipEffect):
+    """Scope mask for sniper kills: a black ring closes in on scope-in and snaps open on the kill."""
+
     enabled: bool = True
-    duration_sec: float = 0.55
-    inner_radius: float = 0.28
-    darkness: float = 0.88
-    flash_scope: bool = True
+    pre_sec: float = 0.35
+    release_sec: float = 0.12
+    inner_radius: float = 0.92
+    darkness: float = 0.92
+    feather: float = 0.05
+
+    def _radius_and_strength(self, t: float, kill_t: float, open_r: float) -> tuple[float, float]:
+        inner = float(self.inner_radius)
+        if t < kill_t:
+            u = (t - (kill_t - float(self.pre_sec))) / max(1e-6, float(self.pre_sec))
+            return open_r + (inner - open_r) * _ease_out(u), 1.0
+        v = (t - kill_t) / max(1e-6, float(self.release_sec))
+        return inner + (open_r - inner) * min(1.0, v), max(0.0, 1.0 - v)
 
     def apply(self, ctx: EffectContext) -> Any:
         clip: VideoClip = ctx.clip
         if not self.enabled or ctx.kill_timestamp is None:
             return clip
-
-        base_dur = float(getattr(clip, "duration", None) or ctx.clip_duration)
-        dur = min(float(self.duration_sec), base_dur)
-        center_t = float(ctx.kill_timestamp)
-        start_t = max(0.0, center_t - dur * 0.55)
-        end_t = min(base_dur, center_t + dur * 0.45)
-        dark = float(self.darkness)
-        r0 = float(self.inner_radius)
-        do_flash = bool(self.flash_scope)
+        kill_t = float(ctx.kill_timestamp)
+        start_t, end_t = kill_t - float(self.pre_sec), kill_t + float(self.release_sec)
 
         def transform(get_frame, t: float):
             frame = get_frame(t)
             if t < start_t or t > end_t:
                 return frame
             h, w = frame.shape[:2]
-            u = (float(t) - start_t) / max(1e-9, end_t - start_t)
-            # Flash-scope: radius starts large and snaps inward toward the kill.
-            if do_flash:
-                radius = r0 + (0.75 - r0) * max(0.0, 1.0 - min(1.0, u / 0.35))
-            else:
-                radius = r0
-            strength = dark * (1.0 - abs(2.0 * u - 1.0))
-            yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-            dist = np.sqrt(((xx - w * 0.5) / (w * 0.5)) ** 2 + ((yy - h * 0.5) / (h * 0.5)) ** 2)
-            mask = np.clip((dist - radius) / max(1e-6, 1.0 - radius), 0.0, 1.0)
-            mask = (mask * strength)[..., None]
-            out = frame.astype(np.float32) * (1.0 - mask)
-            return np.clip(out, 0, 255).astype(np.uint8)
+            dist = _radial_distance(h, w)
+            open_r = float(dist.max())
+            radius, strength = self._radius_and_strength(float(t), kill_t, open_r)
+            alpha = np.clip((dist - radius) / max(1e-6, float(self.feather)), 0.0, 1.0)
+            alpha = (alpha * float(self.darkness) * strength)[..., None]
+            return (frame.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
 
         return clip.transform(transform)

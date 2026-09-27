@@ -7,9 +7,10 @@ from pydantic import BaseModel, Field, model_validator
 from src.config.models import (
     ColorGradingEffectConfig,
     DeathPipEffectConfig,
+    EdgeGlowEffectConfig,
     FreezeFrameEffectConfig,
     HighlightBloomEffectConfig,
-    ImpactStylizeEffectConfig,
+    KillHitEffectConfig,
     LensDistortEffectConfig,
     LetterboxEffectConfig,
     LightWrapEffectConfig,
@@ -46,6 +47,7 @@ class SpecialTreatment(BaseModel):
     event_idx: int = Field(ge=0)
     note: str = ""
     treatment: str = ""
+    hit_style: str = ""
 
 
 def _coerce_pacing_field(val: Any) -> str:
@@ -122,7 +124,8 @@ class ScriptClipEffects(BaseModel):
     color_grading: Optional[ColorGradingEffectConfig] = None
     scope_vignette: Optional[ScopeVignetteEffectConfig] = None
     death_pip: Optional[DeathPipEffectConfig] = None
-    impact_stylize: Optional[ImpactStylizeEffectConfig] = None
+    edge_glow: Optional[EdgeGlowEffectConfig] = None
+    kill_hit: Optional[KillHitEffectConfig] = None
     freeze_frame: Optional[FreezeFrameEffectConfig] = None
     motion_blur: Optional[MotionBlurEffectConfig] = None
     letterbox: Optional[LetterboxEffectConfig] = None
@@ -142,16 +145,18 @@ class ScriptClip(BaseModel):
     # ensuring clip boundaries align to BeatMap times, independent from source timestamps.
     output_start_sec: Optional[float] = Field(default=None, ge=0.0)
     output_end_sec: Optional[float] = Field(default=None, gt=0.0)
-    # Speed factor applied to the source clip to match the desired output duration.
+    # Uniform speed for scripts without time_knots (hand-written / legacy scripts).
     # >1.0 => faster playback (shorter), <1.0 => slower playback (longer).
     speed_factor: Optional[float] = Field(default=None, gt=0.0, le=10.0)
-    # Kill-on-beat alignment: per-clip speeds calculated so the kill frame lands on a beat.
-    # When present, these override the uniform speed_factor for velocity editing.
-    pre_kill_speed: Optional[float] = Field(default=None, gt=0.0, le=10.0)
-    post_kill_speed: Optional[float] = Field(default=None, gt=0.0, le=10.0)
-    kill_output_time_sec: Optional[float] = Field(default=None, ge=0.0)
-    # True when this kill is placed on a drop: hold the pre-kill frame, then release on the accent.
-    beat_drop_hold: bool = False
+    # Every kill in the clip (multi-kill bursts), absolute source seconds.
+    kill_timestamps_sec: list[float] = Field(default_factory=list)
+    # Kill times relative to output_start_sec; each lands on a beat.
+    kill_output_times_sec: list[float] = Field(default_factory=list)
+    # Retime curve: (output_sec, source_sec) pairs relative to clip start.
+    time_knots: Optional[list[tuple[float, float]]] = None
+    recipe: str = "clean"
+    hit_style: str = "flash_blur"
+    scoped: bool = False
     effects: ScriptClipEffects = Field(default_factory=ScriptClipEffects)
     transition_to_next: Optional[ScriptTransition] = None
     arc_phase: Literal["intro", "build", "climax", "outro"] = "build"

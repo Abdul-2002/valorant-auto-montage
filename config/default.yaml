@@ -1,7 +1,6 @@
 output:
-  # Realistic for ~17 detected kills at ~3.4s beat slots; raising this without
-  # more source footage just starves the composer and trips validation.
-  target_duration_sec: 60
+  # Multi-VOD Zishu-length target (~1–1.5 min). Needs enough kills across sources.
+  target_duration_sec: 90
   formats: ["16:9", "9:16"]
   resolution: "1920x1080"
   fps: 60
@@ -18,7 +17,8 @@ effects:
     - death_pip
     - highlight_bloom
     - light_wrap
-    - impact_stylize
+    - edge_glow
+    - kill_hit
     - lens_distort
     - rgb_split
     - letterbox
@@ -26,8 +26,13 @@ effects:
 
   velocity:
     enabled: true
-    kill_slowmo_factor: 0.35
-    kill_slowmo_duration_sec: 0.6
+    # Post-kill slow-mo (Zishu style); recipes override duration per clip.
+    kill_slowmo_factor: 0.4
+    kill_slowmo_duration_sec: 0.9
+    # No frame interpolation: keep >= 30 distinct source frames/s (60fps VOD caps at 0.5x).
+    slowmo_min_unique_fps: 30
+    approach_speed: 1.15
+    exit_speed: 1.35
     transition_speedup_factor: 2.0
     easing: "ease_in_out_cubic"
 
@@ -52,12 +57,26 @@ effects:
     brightness: 0.02
     lut_file: null
 
+  # Enabled per clip only when the kill was scoped (Operator/Marshal/Outlaw).
   scope_vignette:
     enabled: false
-    duration_sec: 0.55
-    inner_radius: 0.28
-    darkness: 0.88
-    flash_scope: true
+    pre_sec: 0.35
+    release_sec: 0.12
+    inner_radius: 0.92
+    darkness: 0.92
+    feather: 0.05
+
+  kill_hit:
+    enabled: true
+    style: "flash_blur"
+    decay_sec: 0.3
+    flash_strength: 0.5
+    blur_px: 16
+    glow_threshold: 0.55
+    glow_blur_px: 31
+    glow_intensity: 1.2
+    shake_px: 12
+    minor_scale: 0.6
 
   death_pip:
     enabled: false
@@ -68,12 +87,16 @@ effects:
     border_px: 5
     desaturate: 0.45
 
-  impact_stylize:
+  # Zishu find-edges + tritone + glow; the composer enables it on cinematic kills.
+  edge_glow:
     enabled: false
-    duration_sec: 0.45
-    edge_strength: 0.55
-    glow_strength: 0.35
-    brightness_pulse: 0.12
+    hold_sec: 0.1
+    fade_sec: 0.5
+    mid_rgb: [40, 140, 255]
+    highlight_rgb: [210, 240, 255]
+    glow_threshold: 0.3
+    glow_blur_px: 51
+    glow_intensity: 1.0
 
   freeze_frame:
     enabled: false
@@ -142,17 +165,27 @@ audio:
     sfx_gain_db: -6
 
 detection:
+  # Primary kill detector: local auto_gaming YOLO. Gemini is director-only (effects).
   strategy: "yolo_legacy"
-  active_detectors: ["auto_gaming_yolo", "audio_peaks"]
+  active_detectors: ["auto_gaming_yolo"]
 
   gemini_video:
-    enabled: true
+    enabled: false
     model: "gemini-2.5-flash"
     min_excitement: 0.3
 
+  gemini_kill_verify:
+    enabled: false
+    model: "gemini-2.5-flash-lite"
+    clip_pre_sec: 1.0
+    clip_post_sec: 1.2
+    min_confidence: 0.55
+    generate_timeout_sec: 90
+    poll_timeout_sec: 120
+
   hud_ocr:
-    enabled: true
-    search_window_sec: 2.0
+    enabled: false
+    search_window_sec: 1.6
     triggers:
       - text: "HEADSHOT"
         region: [0.42, 0.87, 0.58, 0.95]
@@ -181,6 +214,8 @@ detection:
     sample_fps: 3
     presence_conf: 0.3
     reemit_guard_sec: 1.5
+    # Collapse kill-1/kill-2 flicker on the same frag.
+    kill_dedupe_gap_sec: 1.0
     # Anchor beats on the elimination (killfeed row appears ~0.1s after the body
     # drop). Larger values re-anchor onto the start of the spray, making zooms
     # and slowmo fire visibly before the kill.
@@ -195,11 +230,11 @@ detection:
   scoring:
     visual_weight: 0.8
     audio_weight: 0.2
-    dedup_window_sec: 0.5
+    dedup_window_sec: 1.0
 
 ai_director:
   enabled: true
-  # provider: "rule_only" # gemini | openai_compatible | local | rule_only
+  # Gemini only as creative director (effect recipes / pacing), not kill detection.
   provider: "gemini"
   style_preset: "aggressive"
 
@@ -207,11 +242,11 @@ ai_director:
     pacing: 0.8
     effect_intensity: 0.85
     slowmo_bias: 0.6
-    flash_frequency: 0.5
-    shake_intensity: 0.7
-    zoom_aggression: 0.7
+    flash_frequency: 0.65
+    shake_intensity: 0.55
+    zoom_aggression: 0.75
     color_warmth: 0.6
-    beat_sync_strictness: 0.8
+    beat_sync_strictness: 0.9
     variety: 0.7
     arc_enabled: true
 

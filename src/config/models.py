@@ -15,9 +15,15 @@ class OutputConfig(BaseModel):
 
 class VelocityEffectConfig(BaseModel):
     enabled: bool = True
-    kill_slowmo_factor: float = Field(gt=0.05, lt=1.0, default=0.35)
-    # 0.0 is valid: "no slowmo dip" (clean/punch recipes retime without slowmo).
-    kill_slowmo_duration_sec: float = Field(ge=0.0, lt=5.0, default=0.6)
+    # Post-kill slow-mo (Zishu style): speed right after the last kill of a clip.
+    kill_slowmo_factor: float = Field(gt=0.05, lt=1.0, default=0.4)
+    # Output seconds of post-kill slow-mo. 0.0 disables it (clean/punch recipes).
+    kill_slowmo_duration_sec: float = Field(ge=0.0, lt=5.0, default=0.9)
+    # Slow-mo never drops below this many distinct source frames per second
+    # (no frame interpolation: 60fps sources cap at 0.5x, 120fps at 0.25x).
+    slowmo_min_unique_fps: float = Field(ge=10.0, le=120.0, default=30.0)
+    approach_speed: float = Field(ge=0.5, le=2.0, default=1.15)
+    exit_speed: float = Field(ge=0.5, le=2.5, default=1.35)
     transition_speedup_factor: float = Field(gt=0.25, lt=10.0, default=2.0)
     easing: str = Field(default="ease_in_out_cubic")
 
@@ -48,11 +54,44 @@ class ColorGradingEffectConfig(BaseModel):
 
 
 class ScopeVignetteEffectConfig(BaseModel):
+    """Sniper-kill scope mask; the composer enables it only for scoped kills."""
+
     enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=3.0, default=0.55)
-    inner_radius: float = Field(ge=0.1, le=0.9, default=0.28)
-    darkness: float = Field(ge=0.0, le=1.0, default=0.88)
-    flash_scope: bool = True
+    pre_sec: float = Field(gt=0.05, lt=2.0, default=0.35)
+    release_sec: float = Field(gt=0.02, lt=1.0, default=0.12)
+    # Closed-ring radius in half-screen-height units (1.0 touches top/bottom edges).
+    inner_radius: float = Field(ge=0.3, le=1.5, default=0.92)
+    darkness: float = Field(ge=0.0, le=1.0, default=0.92)
+    feather: float = Field(gt=0.0, le=0.5, default=0.05)
+
+
+class KillHitEffectConfig(BaseModel):
+    """Per-kill hit on the beat. flash_blur = brightness + lens blur decaying (Zishu)."""
+
+    enabled: bool = True
+    style: Literal["flash_blur", "glow", "flash_shake"] = "flash_blur"
+    decay_sec: float = Field(gt=0.05, lt=1.5, default=0.3)
+    flash_strength: float = Field(ge=0.0, le=1.0, default=0.5)
+    blur_px: float = Field(ge=0.0, le=64.0, default=16.0)
+    glow_threshold: float = Field(ge=0.2, le=0.95, default=0.55)
+    glow_blur_px: int = Field(ge=3, le=151, default=31)
+    glow_intensity: float = Field(ge=0.0, le=3.0, default=1.2)
+    shake_px: int = Field(ge=0, le=60, default=12)
+    # Strength of earlier kills in a multi-kill clip relative to the last one.
+    minor_scale: float = Field(ge=0.0, le=1.0, default=0.6)
+
+
+class EdgeGlowEffectConfig(BaseModel):
+    """Zishu find-edges + single-hue tritone + glow, blended back out after the kill."""
+
+    enabled: bool = False
+    hold_sec: float = Field(ge=0.0, lt=1.0, default=0.1)
+    fade_sec: float = Field(gt=0.05, lt=2.0, default=0.5)
+    mid_rgb: tuple[int, int, int] = (40, 140, 255)
+    highlight_rgb: tuple[int, int, int] = (210, 240, 255)
+    glow_threshold: float = Field(ge=0.0, le=0.95, default=0.3)
+    glow_blur_px: int = Field(ge=3, le=151, default=51)
+    glow_intensity: float = Field(ge=0.0, le=3.0, default=1.0)
 
 
 class DeathPipEffectConfig(BaseModel):
@@ -63,14 +102,6 @@ class DeathPipEffectConfig(BaseModel):
     margin_frac: float = Field(ge=0.01, le=0.1, default=0.025)
     border_px: int = Field(ge=0, le=16, default=5)
     desaturate: float = Field(ge=0.0, le=1.0, default=0.45)
-
-
-class ImpactStylizeEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.45)
-    edge_strength: float = Field(ge=0.0, le=1.0, default=0.55)
-    glow_strength: float = Field(ge=0.0, le=1.0, default=0.35)
-    brightness_pulse: float = Field(ge=0.0, le=0.5, default=0.12)
 
 
 class FreezeFrameEffectConfig(BaseModel):
@@ -130,7 +161,8 @@ class EffectsConfig(BaseModel):
             "death_pip",
             "highlight_bloom",
             "light_wrap",
-            "impact_stylize",
+            "edge_glow",
+            "kill_hit",
             "lens_distort",
             "rgb_split",
             "letterbox",
@@ -143,7 +175,8 @@ class EffectsConfig(BaseModel):
     color_grading: ColorGradingEffectConfig = Field(default_factory=ColorGradingEffectConfig)
     scope_vignette: ScopeVignetteEffectConfig = Field(default_factory=ScopeVignetteEffectConfig)
     death_pip: DeathPipEffectConfig = Field(default_factory=DeathPipEffectConfig)
-    impact_stylize: ImpactStylizeEffectConfig = Field(default_factory=ImpactStylizeEffectConfig)
+    edge_glow: EdgeGlowEffectConfig = Field(default_factory=EdgeGlowEffectConfig)
+    kill_hit: KillHitEffectConfig = Field(default_factory=KillHitEffectConfig)
     freeze_frame: FreezeFrameEffectConfig = Field(default_factory=FreezeFrameEffectConfig)
     motion_blur: MotionBlurEffectConfig = Field(default_factory=MotionBlurEffectConfig)
     letterbox: LetterboxEffectConfig = Field(default_factory=LetterboxEffectConfig)
@@ -214,7 +247,8 @@ class AutoGamingYoloConfig(BaseModel):
     sample_fps: int = Field(ge=1, le=60, default=3)
     presence_conf: float = Field(ge=0.0, le=1.0, default=0.3)
     reemit_guard_sec: float = Field(ge=0.0, le=30.0, default=1.5)
-    killfeed_latency_sec: float = Field(ge=0.0, le=2.0, default=0.35)
+    kill_dedupe_gap_sec: float = Field(ge=0.0, le=5.0, default=1.0)
+    killfeed_latency_sec: float = Field(ge=0.0, le=2.0, default=0.1)
     refine_full_fps: bool = True
     class_mapping: dict[str, str] = Field(
         default_factory=lambda: {
@@ -239,15 +273,27 @@ class AudioPeaksConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    visual_weight: float = Field(ge=0.0, le=1.0, default=0.7)
-    audio_weight: float = Field(ge=0.0, le=1.0, default=0.3)
-    dedup_window_sec: float = Field(ge=0.0, le=10.0, default=0.5)
+    visual_weight: float = Field(ge=0.0, le=1.0, default=0.8)
+    audio_weight: float = Field(ge=0.0, le=1.0, default=0.2)
+    dedup_window_sec: float = Field(ge=0.0, le=10.0, default=1.0)
 
 
 class GeminiVideoDetectionConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     model: str = "gemini-2.5-flash"
     min_excitement: float = Field(ge=0.0, le=1.0, default=0.3)
+
+
+class GeminiKillVerifyConfig(BaseModel):
+    """Short-clip Gemini visual accept/reject after candidate detection."""
+
+    enabled: bool = False
+    model: str = "gemini-2.5-flash-lite"
+    clip_pre_sec: float = Field(ge=0.3, le=3.0, default=1.0)
+    clip_post_sec: float = Field(ge=0.3, le=3.0, default=1.2)
+    min_confidence: float = Field(ge=0.0, le=1.0, default=0.55)
+    generate_timeout_sec: float = Field(ge=15.0, le=300.0, default=90.0)
+    poll_timeout_sec: float = Field(ge=15.0, le=300.0, default=120.0)
 
 
 class HudOcrTrigger(BaseModel):
@@ -256,7 +302,7 @@ class HudOcrTrigger(BaseModel):
 
 
 class HudOcrConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     search_window_sec: float = Field(ge=0.5, le=5.0, default=2.0)
     triggers: list[HudOcrTrigger] = Field(default_factory=lambda: [
         HudOcrTrigger(text="HEADSHOT", region=(0.42, 0.87, 0.58, 0.95)),
@@ -266,9 +312,11 @@ class HudOcrConfig(BaseModel):
 
 
 class DetectionConfig(BaseModel):
-    strategy: Literal["gemini", "yolo_legacy", "hybrid"] = "gemini"
-    active_detectors: list[str] = Field(default_factory=lambda: ["gemini_video", "hud_ocr", "audio_peaks"])
+    # Kill detection is local YOLO (auto_gaming). Gemini is reserved for ai_director only.
+    strategy: Literal["gemini", "yolo_legacy", "hybrid"] = "yolo_legacy"
+    active_detectors: list[str] = Field(default_factory=lambda: ["auto_gaming_yolo"])
     gemini_video: GeminiVideoDetectionConfig = Field(default_factory=GeminiVideoDetectionConfig)
+    gemini_kill_verify: GeminiKillVerifyConfig = Field(default_factory=GeminiKillVerifyConfig)
     hud_ocr: HudOcrConfig = Field(default_factory=HudOcrConfig)
     valorant_kill_feed: ValorantKillFeedConfig = Field(default_factory=ValorantKillFeedConfig)
     valorant_yolo: ValorantYoloConfig = Field(default_factory=ValorantYoloConfig)

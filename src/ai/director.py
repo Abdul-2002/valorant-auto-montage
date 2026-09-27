@@ -42,6 +42,7 @@ def generate_montage_script(
             creative_config_resolved=creative_cfg,
             brief=brief,
             target_duration_sec=int(config.output.target_duration_sec),
+            velocity=config.effects.velocity,
         )
     )
 

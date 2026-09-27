@@ -99,14 +99,17 @@ def main() -> int:
         print(f"\nplanned (script) timeline, phase offset {offset:.3f}s:")
         kerrs = []
         for i, c in enumerate(clips):
-            ko = c.get("kill_output_time_sec")
             os_ = c.get("output_start_sec")
-            if ko is None or os_ is None:
+            rel_kills = c.get("kill_output_times_sec") or []
+            if not rel_kills and c.get("kill_output_time_sec") is not None:
+                rel_kills = [c["kill_output_time_sec"]]
+            if os_ is None:
                 continue
-            t = float(os_) + float(ko) - offset
-            e = nearest(t, beat_times)
-            kerrs.append(e)
-            print(f"  clip {i}: planned kill @ {t:7.3f}s -> nearest beat {e*1000:6.0f} ms away")
+            for ko in rel_kills:
+                t = float(os_) + float(ko) - offset
+                e = nearest(t, beat_times)
+                kerrs.append(e)
+                print(f"  clip {i}: planned kill @ {t:7.3f}s -> nearest beat {e*1000:6.0f} ms away")
         if kerrs:
             ok = sum(1 for e in kerrs if e <= 0.10)
             print(f"planned kills within 100ms of beat: {ok}/{len(kerrs)}")
