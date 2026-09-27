@@ -21,9 +21,10 @@ from src.ai.enrichment import enrich_events
 from src.ai.providers import safe_generate_brief
 from src.ai.providers.base import BriefContext
 from src.config.loader import load_config
-from src.pipeline.beat_analyzer import analyze_beats
 from src.pipeline.highlight_detector import detect_highlights
+from src.pipeline.kill_assets import attach_ghost_cutouts
 from src.pipeline.montage_assembler import render_montage
+from src.pipeline.music_edit import prepare_edited_track
 from src.pipeline.types import DetectedEvent
 
 
@@ -41,6 +42,7 @@ def main() -> int:
     p.add_argument("--music", required=True, type=Path, help="Music track path")
     p.add_argument("--out", type=Path, default=ROOT / "artifacts/local_pipeline_run", help="Output directory")
     p.add_argument("--config", type=Path, default=ROOT / "config/default.yaml")
+    p.add_argument("--highlights", type=Path, default=None, help="Reuse an existing highlights.json and skip detection")
     args = p.parse_args()
 
     videos = [v.resolve() for v in args.video]
@@ -58,9 +60,15 @@ def main() -> int:
     cfg_path = args.config if args.config.is_file() else ROOT / args.config
     config = load_config(cfg_path)
 
-    print(f"Phase: highlight detection ({len(videos)} video(s))...", flush=True)
-    highlights = detect_highlights(video_paths=videos, config=config)
-    print(f"  -> {len(highlights)} events", flush=True)
+    if args.highlights is not None:
+        print(f"Phase: reuse highlights {args.highlights}...", flush=True)
+        payload = json.loads(args.highlights.read_text(encoding="utf-8"))
+        highlights = [DetectedEvent.model_validate(h) for h in payload.get("highlights", payload)]
+        print(f"  -> {len(highlights)} events", flush=True)
+    else:
+        print(f"Phase: highlight detection ({len(videos)} video(s))...", flush=True)
+        highlights = detect_highlights(video_paths=videos, config=config)
+        print(f"  -> {len(highlights)} events", flush=True)
 
     hl_json = [h.model_dump(mode="json") for h in highlights]
     (out / "highlights.json").write_text(json.dumps({"highlights": hl_json}, indent=2), encoding="utf-8")
@@ -69,13 +77,15 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    beat_map = None
-    print("Phase: beat analysis...", flush=True)
-    try:
-        beat_map = analyze_beats(music)
-        print(f"  -> tempo ~{getattr(beat_map, 'tempo_bpm', None)} bpm", flush=True)
-    except Exception as exc:
-        print(f"  -> skipped: {exc}", flush=True)
+    print("Phase: music edit + beat analysis...", flush=True)
+    music_for_render, beat_map = prepare_edited_track(
+        music, cache_dir=out / "song", needed_sec=float(config.output.target_duration_sec)
+    )
+    print(
+        f"  -> tempo ~{getattr(beat_map, 'tempo_bpm', None)} bpm, track={music_for_render.name}, "
+        f"downbeats={len(getattr(beat_map, 'downbeat_times', []) or [])}",
+        flush=True,
+    )
 
     brief = None
     try:
@@ -101,16 +111,29 @@ def main() -> int:
     )
     print(f"  -> {len(script.clips)} clips", flush=True)
 
+    print("Phase: ghost cut-outs...", flush=True)
+    w, h = (int(x) for x in str(config.output.resolution).lower().split("x"))
+    script = attach_ghost_cutouts(
+        script,
+        video_paths=videos,
+        out_dir=out,
+        resolution=(w, h),
+        sam_model_path=ROOT / config.detection.sam_model_path,
+    )
+    script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
+
     render_out = out / "outputs"
     render_out.mkdir(parents=True, exist_ok=True)
     print("Phase: render (MoviePy + ffmpeg)...", flush=True)
     render_montage(
         video_paths=videos,
-        music_path=music,
+        music_path=music_for_render,
         highlights=hl_json,
         config=config,
         out_dir=render_out,
         script=script,
+        beat_map=beat_map,
+        song_title=music.stem,
     )
     print(f"Done. Outputs: {render_out}", flush=True)
     return 0

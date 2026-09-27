@@ -26,12 +26,6 @@ def _lens_blur(img: np.ndarray, sigma: float) -> np.ndarray:
     return cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
 
 
-def _jitter(frame_idx: int, axis: int) -> float:
-    x = ((frame_idx + 1) * 1103515245 ^ (axis * 12345)) & 0xFFFFFFFF
-    x = (x * 1664525 + 1013904223) & 0xFFFFFFFF
-    return (float(x) / 2**32) * 2.0 - 1.0
-
-
 @register_clip_effect("kill_hit")
 @dataclass
 class KillHitEffect(ClipEffect):
@@ -45,14 +39,13 @@ class KillHitEffect(ClipEffect):
     glow_threshold: float = 0.55
     glow_blur_px: int = 31
     glow_intensity: float = 1.2
-    shake_px: int = 12
     minor_scale: float = 0.6
 
     def _strength(self, t: float, anchors: tuple[float, ...]) -> float:
         scales = [float(self.minor_scale)] * (len(anchors) - 1) + [1.0]
         return max(s * decay_envelope(t, a, float(self.decay_sec)) for s, a in zip(scales, anchors))
 
-    def _hit(self, frame: np.ndarray, e: float, frame_idx: int) -> np.ndarray:
+    def _hit(self, frame: np.ndarray, e: float) -> np.ndarray:
         img = frame.astype(np.float32) / 255.0
         scale = frame.shape[0] / _REFERENCE_HEIGHT
         flash = float(self.flash_strength) * e
@@ -64,13 +57,11 @@ class KillHitEffect(ClipEffect):
         elif self.style == "flash_blur":
             # blur_px is a lens-blur radius; Gaussian sigma ~ radius / 2.
             img = _lens_blur(img, 0.5 * float(self.blur_px) * scale * e)
+        elif self.style == "flash_shake":
+            # The camera effect carries the (boosted) shake; the hit is a harder flash.
+            flash = min(1.0, flash * 1.3)
         img = img + (1.0 - img) * flash
-        out = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
-        if self.style == "flash_shake":
-            amp = float(self.shake_px) * scale * e
-            m = np.float32([[1, 0, amp * _jitter(frame_idx, 0)], [0, 1, amp * _jitter(frame_idx, 1)]])
-            out = cv2.warpAffine(out, m, (out.shape[1], out.shape[0]), borderMode=cv2.BORDER_REPLICATE)
-        return out
+        return (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
 
     def apply(self, ctx: EffectContext) -> Any:
         clip: VideoClip = ctx.clip
@@ -79,13 +70,12 @@ class KillHitEffect(ClipEffect):
         )
         if not self.enabled or not anchors:
             return clip
-        fps = max(1, int(ctx.fps))
 
         def transform(get_frame, t: float):
             frame = get_frame(t)
             e = self._strength(float(t), anchors)
             if e < 0.01:
                 return frame
-            return self._hit(frame, e, int(round(float(t) * fps)))
+            return self._hit(frame, e)
 
         return clip.transform(transform)

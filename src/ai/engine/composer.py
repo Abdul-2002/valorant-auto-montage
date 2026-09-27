@@ -3,17 +3,21 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from src.ai.enrichment import EnrichedEvent
 from src.ai.engine.arc_modeler import assign_arc_phases
 from src.ai.engine.clip_planner import ClipDirection, build_script_clip
 from src.ai.engine.clip_selector import select_event_indices
 from src.ai.engine.effect_mapper import VALID_RECIPES, assign_hit_styles, assign_recipes
+from src.ai.engine.feature_budget import assign_features
 from src.ai.engine.kill_grouping import KillGroup, fit_groups_to_duration, group_kills, move_finale_last
 from src.ai.engine.transition_planner import plan_transitions
 from src.ai.schema import CreativeBrief, MontageScript, ScriptClip
 from src.config.models import VelocityEffectConfig
+from src.pipeline.bar_layout import BEATS_PER_BAR, bars_needed, plan_on_bars, song_end_sec
 from src.pipeline.beat_analyzer import BeatMap
-from src.pipeline.beat_layout import beat_interval, plan_kill_accents
+from src.pipeline.beat_layout import ClipBeatPlan, beat_interval, plan_kill_accents
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,9 @@ MAX_CANDIDATE_EVENTS: int = 60
 # Detector-level dedupe already merges killfeed flicker at 1.0s.
 NEAR_DUP_WINDOW_SEC: float = 0.8
 _RECIPE_PRIORITY = {r: i for i, r in enumerate(("clean", "slow", "punch", "cinematic"))}
+# Sections where the camera pulses on strong beats between kills.
+PULSE_SECTIONS = frozenset({"chorus", "drop", "inst", "solo", "climax"})
+_PULSE_KILL_GUARD_SEC = 0.3
 
 
 @dataclass(frozen=True)
@@ -34,18 +41,17 @@ class ComposeInputs:
     velocity: VelocityEffectConfig = field(default_factory=VelocityEffectConfig)
 
 
+def _bar_mode(beat_map: BeatMap | None) -> bool:
+    return beat_map is not None and len(beat_map.downbeat_times or []) >= 3
+
+
 def _start_beat_index(beat_map: BeatMap | None, target_sec: float) -> int:
     """First beat of the first chorus/drop, pulled earlier if the song would run out."""
     if beat_map is None or not beat_map.beat_times:
         return 0
     beats = sorted(float(b) for b in beat_map.beat_times)
-    start_t = 0.0
-    for sec in beat_map.sections or []:
-        if str(sec.section_type) in ("drop", "chorus"):
-            start_t = float(sec.start_sec)
-            break
-    latest_start = max(0.0, beats[-1] - float(target_sec) * 1.1)
-    start_t = min(start_t, latest_start)
+    start_t = next((float(s.start_sec) for s in beat_map.sections or [] if s.section_type in ("drop", "chorus")), 0.0)
+    start_t = min(start_t, max(0.0, beats[-1] - float(target_sec) * 1.1))
     return next((i for i, b in enumerate(beats) if b >= start_t), 0)
 
 
@@ -60,9 +66,7 @@ def _directed_treatments(
     styles: dict[int, str] = {}
     for t in brief.special_treatments or []:
         idx = int(t.event_idx)
-        if not 0 <= idx < len(enriched):
-            continue
-        gi = group_of.get(id(enriched[idx]))
+        gi = group_of.get(id(enriched[idx])) if 0 <= idx < len(enriched) else None
         if gi is None:
             continue
         recipe = str(t.treatment)
@@ -73,20 +77,60 @@ def _directed_treatments(
     return recipes, styles
 
 
-def _select_groups(inp: ComposeInputs) -> list[KillGroup]:
+def select_kill_groups(
+    *, enriched: list[EnrichedEvent], brief: CreativeBrief | None, beat_map: BeatMap | None, target_sec: float
+) -> list[KillGroup]:
+    """Candidate kills grouped into bursts, trimmed to what the song can hold, finale last."""
     selection = select_event_indices(
-        enriched=inp.enriched_events,
-        brief=inp.brief,
+        enriched=enriched,
+        brief=brief,
         max_events=MAX_CANDIDATE_EVENTS,
         diversity_window_sec=0.0,
         near_dup_window_sec=NEAR_DUP_WINDOW_SEC,
     )
-    selected = [inp.enriched_events[i] for i in selection.event_indices]
-    interval = beat_interval(inp.beat_map, float(inp.target_duration_sec))
-    groups = fit_groups_to_duration(
-        group_kills(selected), target_sec=float(inp.target_duration_sec), beat_interval=interval
-    )
+    groups = group_kills([enriched[i] for i in selection.event_indices])
+    interval = beat_interval(beat_map, target_sec)
+    if _bar_mode(beat_map):
+        bar_sec = BEATS_PER_BAR * interval
+        groups = fit_groups_to_duration(
+            groups,
+            target_sec=song_end_sec(beat_map) - float(beat_map.downbeat_times[0]),
+            beat_interval=interval,
+            min_clip_sec=lambda g: bars_needed(g.demand(), interval) * bar_sec,
+        )
+    else:
+        groups = fit_groups_to_duration(groups, target_sec=target_sec, beat_interval=interval)
     return move_finale_last(groups)
+
+
+def _plan(inp: ComposeInputs, groups: list[KillGroup]) -> list[ClipBeatPlan]:
+    demands = [g.demand() for g in groups]
+    if _bar_mode(inp.beat_map):
+        return plan_on_bars(beat_map=inp.beat_map, demands=demands, song_end_sec=song_end_sec(inp.beat_map))
+    return plan_kill_accents(
+        beat_map=inp.beat_map,
+        demands=demands,
+        target_duration_sec=float(inp.target_duration_sec),
+        start_beat_index=_start_beat_index(inp.beat_map, float(inp.target_duration_sec)),
+    )
+
+
+def _accent_beats(beat_map: BeatMap | None, plan: ClipBeatPlan) -> list[float]:
+    """Clip-relative strong beats in high-energy sections, away from the kills (camera pulses)."""
+    if beat_map is None or not beat_map.beat_times or not beat_map.beat_strengths:
+        return []
+    strengths = np.asarray(beat_map.beat_strengths, dtype=np.float64)
+    thr = max(0.55, float(np.percentile(strengths, 70.0)))
+    out: list[float] = []
+    for b, s in zip(beat_map.beat_times, strengths):
+        if not plan.output_start_sec < b < plan.output_end_sec or s < thr:
+            continue
+        if any(abs(b - k) < _PULSE_KILL_GUARD_SEC for k in plan.kill_output_sec):
+            continue
+        label = next((x.section_type for x in beat_map.sections if x.start_sec <= b < x.end_sec), "")
+        if label in PULSE_SECTIONS:
+            out.append(float(b) - plan.output_start_sec)
+    return out
 
 
 def _with_transitions(clips: list[ScriptClip], inp: ComposeInputs) -> list[ScriptClip]:
@@ -103,30 +147,34 @@ def _with_transitions(clips: list[ScriptClip], inp: ComposeInputs) -> list[Scrip
 
 
 def compose_script(inp: ComposeInputs) -> MontageScript:
-    groups = _select_groups(inp)
-    plans = plan_kill_accents(
-        beat_map=inp.beat_map,
-        demands=[g.demand() for g in groups],
-        target_duration_sec=float(inp.target_duration_sec),
-        start_beat_index=_start_beat_index(inp.beat_map, float(inp.target_duration_sec)),
+    groups = select_kill_groups(
+        enriched=inp.enriched_events, brief=inp.brief, beat_map=inp.beat_map, target_sec=float(inp.target_duration_sec)
     )
+    plans = _plan(inp, groups)
     if len(plans) < len(groups):
         logger.warning("composer: song too short for %d clips; dropped %d", len(groups), len(groups) - len(plans))
     groups = groups[: len(plans)]
     phases = assign_arc_phases(
-        num_clips=len(plans),
-        brief=inp.brief,
-        beat_map=inp.beat_map,
-        clip_output_starts_sec=[p.output_start_sec for p in plans],
+        num_clips=len(plans), brief=inp.brief, beat_map=inp.beat_map, clip_output_starts_sec=[p.output_start_sec for p in plans]
     ).phases
     directed_recipes, directed_styles = _directed_treatments(inp.enriched_events, groups, inp.brief)
     recipes = assign_recipes(scores=[g.score for g in groups], phases=phases, directed=directed_recipes)
     styles = assign_hit_styles(n=len(groups), directed=directed_styles)
+    features = assign_features(
+        recipes=recipes, kill_counts=[len(g.events) for g in groups], scores=[g.score for g in groups]
+    )
     clips = [
         build_script_clip(
             group=g,
             plan=p,
-            direction=ClipDirection(recipe=recipes[i], hit_style=styles[i], arc_phase=str(phases[i])),
+            direction=ClipDirection(
+                recipe=recipes[i],
+                hit_style=styles[i],
+                arc_phase=str(phases[i]),
+                pip_style=features[i].pip_style,
+                ghost_candidate=features[i].ghost_candidate,
+                accent_beats=tuple(_accent_beats(inp.beat_map, p)),
+            ),
             velocity=inp.velocity,
             creative_config=inp.creative_config_resolved,
             brief=inp.brief,
@@ -134,11 +182,13 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         for i, (g, p) in enumerate(zip(groups, plans))
     ]
     logger.info(
-        "composer: %d clips / %d kills, recipes=%s, scoped=%d, director-set=%d",
+        "composer: %d clips / %d kills (bar_mode=%s), recipes=%s, pip=%d, ghost_candidates=%d, director-set=%d",
         len(clips),
         sum(len(c.kill_timestamps_sec) for c in clips),
+        _bar_mode(inp.beat_map),
         {r: recipes.count(r) for r in VALID_RECIPES},
-        sum(1 for c in clips if c.scoped),
+        sum(1 for f in features if f.pip_style),
+        sum(1 for f in features if f.ghost_candidate),
         len(directed_recipes),
     )
     clips = _with_transitions(clips, inp)

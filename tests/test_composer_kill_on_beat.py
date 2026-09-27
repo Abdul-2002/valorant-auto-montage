@@ -84,6 +84,7 @@ def test_should_not_repeat_source_footage_between_clips() -> None:
 def test_should_hit_every_clip_and_cap_60fps_slowmo_at_half_speed() -> None:
     for clip in _script().clips:
         assert clip.effects.kill_hit is not None
+        assert clip.effects.camera is not None and clip.effects.camera.enabled
         vel = clip.effects.velocity
         if clip.video_index == 0 and vel.kill_slowmo_duration_sec > 0:
             assert vel.kill_slowmo_factor >= 0.5

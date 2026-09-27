@@ -9,7 +9,9 @@ output:
 effects:
   pipeline_order:
     - velocity
+    - ghost_freeze
     - freeze_frame
+    - camera
     - zoom
     - shake
     - motion_blur
@@ -22,7 +24,35 @@ effects:
     - lens_distort
     - rgb_split
     - letterbox
+    - pip_inset
     - color_grading
+
+  camera:
+    enabled: false
+    kill_shake_px: 8
+    kill_shake_rot_deg: 0.6
+    kill_shake_sec: 0.28
+    beat_pulse: 0.03
+    beat_pulse_sec: 0.18
+    push_in: 0.0
+    crash_zoom: 0.0
+    crash_zoom_sec: 0.3
+    transition_sec: 0.14
+
+  ghost_freeze:
+    enabled: false
+    lead_sec: 0.5
+    max_alpha: 0.55
+
+  pip_inset:
+    enabled: false
+    style: "freeze_inset"
+    delay_sec: 0.08
+    hold_sec: 1.0
+    zoom: 2.2
+    replay_window_sec: 0.6
+    replay_speed: 0.5
+    width_px: 520
 
   velocity:
     enabled: true
@@ -37,7 +67,7 @@ effects:
     easing: "ease_in_out_cubic"
 
   zoom:
-    enabled: true
+    enabled: false
     max_zoom: 1.32
     duration_sec: 0.45
     crash_in_frac: 0.35
@@ -45,7 +75,7 @@ effects:
     center: "screen_center"
 
   shake:
-    enabled: true
+    enabled: false
     amplitude_px: 6
     decay_rate: 0.85
     duration_frames: 8
@@ -135,6 +165,17 @@ effects:
     duration_sec: 0.4
     radius: 0.55
     intensity: 0.28
+
+overlays:
+  enabled: true
+  light_leaks: true
+  light_leak_strength: 0.35
+  flare_streaks: true
+  flare_strength: 0.8
+  title_text: "VALORANT MONTAGE"
+  title_sec: 3.2
+  song_credit: true
+  multi_kill_callouts: true
 
 transitions:
   enabled: true
@@ -231,6 +272,8 @@ detection:
     visual_weight: 0.8
     audio_weight: 0.2
     dedup_window_sec: 1.0
+
+  sam_model_path: "models/sam2.1_t.pt"
 
 ai_director:
   enabled: true

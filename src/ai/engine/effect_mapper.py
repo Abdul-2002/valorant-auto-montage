@@ -5,14 +5,15 @@ from dataclasses import dataclass
 from typing import Literal
 
 from src.ai.schema import CreativeBrief, ScriptClipEffects
+from src.ai.engine.feature_budget import PIP_STYLES
 from src.config.models import (
+    CameraEffectConfig,
     ColorGradingEffectConfig,
     EdgeGlowEffectConfig,
     KillHitEffectConfig,
+    PipInsetEffectConfig,
     ScopeVignetteEffectConfig,
-    ShakeEffectConfig,
     VelocityEffectConfig,
-    ZoomEffectConfig,
 )
 from src.effects.presets.valorant import get_preset
 
@@ -21,17 +22,17 @@ from src.effects.presets.valorant import get_preset
 #   clean:     kill hit only.
 #   punch:     kill hit + crash zoom. No slow-mo.
 #   slow:      kill hit + post-kill slow-mo (Zishu signature). The default.
-#   cinematic: hit + post-kill slow-mo + zoom + shake + edge-glow stylize. Budgeted.
+#   cinematic: hit + post-kill slow-mo + camera push/crash + edge-glow. Budgeted.
 Recipe = Literal["clean", "punch", "slow", "cinematic"]
 VALID_RECIPES: tuple[str, ...] = ("clean", "punch", "slow", "cinematic")
 HIT_STYLE_CYCLE: tuple[str, ...] = ("flash_blur", "flash_blur", "glow", "flash_shake")
 
-ZOOM_BUDGET_FRACTION: float = 0.4
+ZOOM_BUDGET_FRACTION: float = 0.45
 MAX_CINEMATIC: int = 2
 _PHASE_ROTATION: dict[str, tuple[str, ...]] = {
     "intro": ("clean", "slow"),
-    "build": ("slow", "punch", "slow", "clean"),
-    "climax": ("slow", "punch"),
+    "build": ("slow", "punch", "slow", "punch"),
+    "climax": ("punch", "slow"),
     "outro": ("slow",),
 }
 # Output seconds of post-kill slow-mo and its speed, per recipe.
@@ -121,21 +122,21 @@ def slowmo_params(*, recipe: str, arc_phase: str) -> tuple[float, float]:
     return duration, (_SLOWMO_FACTOR_CLIMAX if climactic else _SLOWMO_FACTOR_DEFAULT)
 
 
-def _zoom_for(recipe: str, preset_zoom: dict) -> ZoomEffectConfig | None:
-    if recipe not in ("punch", "cinematic"):
-        return None
-    keys = set(ZoomEffectConfig.model_fields) - {"enabled"}
-    params = {k: v for k, v in preset_zoom.items() if k in keys}
+def _camera_for(recipe: str) -> CameraEffectConfig:
+    """Camera on every clip. Punch crashes in; slow/cinematic push in after the kill."""
     if recipe == "punch":
-        # Crash in just before the kill, snap back on the hit.
-        params.update(max_zoom=1.22, duration_sec=0.28, crash_in_frac=0.78)
-    else:
-        params.update(
-            max_zoom=min(1.28, float(params.get("max_zoom", 1.28))),
-            duration_sec=min(0.4, float(params.get("duration_sec", 0.4))),
-            crash_in_frac=0.55,
-        )
-    return ZoomEffectConfig.model_validate({"enabled": True, **params})
+        return CameraEffectConfig(enabled=True, crash_zoom=0.22, crash_zoom_sec=0.30, push_in=0.0, beat_pulse=0.04, kill_shake_px=10.0)
+    if recipe == "cinematic":
+        return CameraEffectConfig(enabled=True, crash_zoom=0.12, crash_zoom_sec=0.34, push_in=0.14, beat_pulse=0.04, kill_shake_px=12.0)
+    if recipe == "slow":
+        return CameraEffectConfig(enabled=True, crash_zoom=0.0, push_in=0.10, beat_pulse=0.03, kill_shake_px=8.0)
+    return CameraEffectConfig(enabled=True, crash_zoom=0.0, push_in=0.0, beat_pulse=0.02, kill_shake_px=6.0)
+
+
+def _pip_for(pip_style: str) -> PipInsetEffectConfig | None:
+    if pip_style not in PIP_STYLES:
+        return None
+    return PipInsetEffectConfig(enabled=True, style=pip_style)  # type: ignore[arg-type]
 
 
 def map_effects(
@@ -147,6 +148,7 @@ def map_effects(
     hit_style: str = "flash_blur",
     scoped: bool = False,
     slowmo_factor: float | None = None,
+    pip_style: str = "",
 ) -> ScriptClipEffects:
     intensity = _intensity(creative_config=creative_config, brief=brief)
     preset = get_preset(str(inp.arc_phase), intensity)
@@ -156,19 +158,13 @@ def map_effects(
         kill_slowmo_duration_sec=slow_sec,
         kill_slowmo_factor=float(slowmo_factor if slowmo_factor is not None else default_factor),
     )
-    shake = None
-    if recipe == "cinematic":
-        shake_keys = set(ShakeEffectConfig.model_fields) - {"enabled"}
-        shake = ShakeEffectConfig.model_validate(
-            {"enabled": True, **{k: v for k, v in preset.shake.items() if k in shake_keys}}
-        )
     color_keys = set(ColorGradingEffectConfig.model_fields) - {"enabled"}
     # ~AE Brightness +100 at intensity 0.85 (Zishu kill flash), scaled by style intensity.
     flash = min(0.5, max(0.2, 0.2 + 0.25 * intensity))
     return ScriptClipEffects(
         velocity=velocity,
-        zoom=_zoom_for(recipe, preset.zoom),
-        shake=shake,
+        camera=_camera_for(recipe),
+        pip_inset=_pip_for(pip_style),
         color_grading=ColorGradingEffectConfig.model_validate(
             {"enabled": True, **{k: v for k, v in preset.color_grading.items() if k in color_keys}}
         ),

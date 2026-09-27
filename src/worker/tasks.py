@@ -12,9 +12,10 @@ from src.ai.schema import CreativeBrief
 from src.ai.enrichment import enrich_events
 from src.ai.providers import safe_generate_brief
 from src.ai.providers.base import BriefContext
-from src.pipeline.beat_analyzer import analyze_beats
 from src.pipeline.highlight_detector import detect_highlights
+from src.pipeline.kill_assets import attach_ghost_cutouts
 from src.pipeline.montage_assembler import render_montage
+from src.pipeline.music_edit import prepare_edited_track
 from src.worker.celery_app import celery_app
 
 
@@ -85,12 +86,17 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
 
     # BeatMap: used by the director (beat layout, transitions, brief). The renderer aligns
     # music to script output_start_sec in montage_assembler when all clips carry output fields.
+    music_src = Path(meta["music"]) if meta.get("music") else None
+    music_for_render = music_src
     beat_map = None
-    try:
-        if meta.get("music"):
-            beat_map = analyze_beats(Path(meta["music"]))
-    except Exception:
-        beat_map = None
+    if music_src is not None:
+        try:
+            music_for_render, beat_map = prepare_edited_track(
+                music_src, cache_dir=tdir / "song", needed_sec=float(config.output.target_duration_sec)
+            )
+        except Exception:
+            beat_map = None
+            music_for_render = music_src
 
     script_path = tdir / "montage_script.json"
 
@@ -125,13 +131,25 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
             persist_path=script_path,
         )
 
+    w, h = (int(x) for x in str(config.output.resolution).lower().split("x"))
+    script = attach_ghost_cutouts(
+        script,
+        video_paths=[Path(p) for p in meta["videos"]],
+        out_dir=tdir,
+        resolution=(w, h),
+        sam_model_path=Path(config.detection.sam_model_path),
+    )
+    script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
+
     render_montage(
         video_paths=[Path(p) for p in meta["videos"]],
-        music_path=Path(meta["music"]) if meta.get("music") else None,
+        music_path=music_for_render,
         highlights=confirmed["highlights"],
         config=config,
         out_dir=out_dir,
         script=script,
+        beat_map=beat_map,
+        song_title=music_src.stem if music_src is not None else "",
         task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "rendering", "progress": p}),
     )
 

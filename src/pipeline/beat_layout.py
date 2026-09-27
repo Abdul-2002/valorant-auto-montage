@@ -54,7 +54,7 @@ class ClipBeatPlan:
 
 
 @dataclass(frozen=True)
-class _Grid:
+class BeatGrid:
     beats: list[float]
     strengths: list[float]
     energy: list[float]
@@ -103,7 +103,7 @@ def _energy_at_beats(beat_map: BeatMap, beats: list[float]) -> list[float]:
     return [float(r) / max(1, len(ranks) - 1) for r in ranks]
 
 
-def _build_grid(beat_map: BeatMap | None, target_sec: float) -> _Grid:
+def build_grid(beat_map: BeatMap | None, target_sec: float) -> BeatGrid:
     raw_beats = [float(x) for x in (beat_map.beat_times if beat_map is not None else [])]
     raw_str = [float(x) for x in (getattr(beat_map, "beat_strengths", None) or [])]
     if raw_str and len(raw_str) == len(raw_beats):
@@ -122,15 +122,15 @@ def _build_grid(beat_map: BeatMap | None, target_sec: float) -> _Grid:
         energy = [0.5] * count
     else:
         energy = _energy_at_beats(beat_map, beats) if beat_map is not None else [0.5] * len(beats)
-    return _Grid(beats, strengths, energy, interval, _strong_threshold(strengths))
+    return BeatGrid(beats, strengths, energy, interval, _strong_threshold(strengths))
 
 
 def beat_interval(beat_map: BeatMap | None, target_duration_sec: float = 60.0) -> float:
     """Median beat interval after double-time filtering (synthetic grid when unusable)."""
-    return _build_grid(beat_map, float(target_duration_sec)).interval
+    return build_grid(beat_map, float(target_duration_sec)).interval
 
 
-def _pick_strong(grid: _Grid, lo: int, hi: int, target: int) -> int:
+def pick_strong(grid: BeatGrid, lo: int, hi: int, target: int) -> int:
     """Strongest beat in [lo, hi], lightly penalized by distance from ``target``."""
     hi = min(hi, len(grid.beats) - 1)
     lo = max(0, min(lo, hi))
@@ -143,7 +143,7 @@ def _pick_strong(grid: _Grid, lo: int, hi: int, target: int) -> int:
     return best_i
 
 
-def _next_kill_beat(grid: _Grid, prev_i: int, src_gap: float) -> int:
+def next_kill_beat(grid: BeatGrid, prev_i: int, src_gap: float) -> int:
     """Beat for a follow-up kill in a multi-kill so playback speed stays plausible."""
     nominal = max(1, int(round(src_gap / (grid.interval * NOMINAL_SPEED))))
     lo_speed, hi_speed = MULTI_KILL_SPEED_RANGE
@@ -160,14 +160,14 @@ def _next_kill_beat(grid: _Grid, prev_i: int, src_gap: float) -> int:
     return max(candidates, key=lambda j: (grid.strengths[j] >= grid.strong_thr, grid.strengths[j], -abs(j - prev_i - nominal)))
 
 
-def _gap_beats(grid: _Grid, beat_i: int, base_gap: int) -> int:
+def _gap_beats(grid: BeatGrid, beat_i: int, base_gap: int) -> int:
     """Shorter gaps in loud sections, longer in quiet ones."""
     e = grid.energy[min(beat_i, len(grid.energy) - 1)]
     adjust = -2 if e >= 0.66 else (2 if e <= 0.33 else 0)
     return int(np.clip(base_gap + adjust, GAP_BEATS_MIN, GAP_BEATS_MAX))
 
 
-def _base_gap(grid: _Grid, demands: Sequence[ClipDemand], target_sec: float) -> int:
+def _base_gap(grid: BeatGrid, demands: Sequence[ClipDemand], target_sec: float) -> int:
     internal = sum(
         max(1, round(g / (grid.interval * NOMINAL_SPEED))) for d in demands for g in d.src_kill_gaps
     )
@@ -176,7 +176,7 @@ def _base_gap(grid: _Grid, demands: Sequence[ClipDemand], target_sec: float) -> 
     return int(np.clip(round(per_clip), GAP_BEATS_MIN, GAP_BEATS_MAX))
 
 
-def _pre_bounds(grid: _Grid, demand: ClipDemand) -> tuple[int, int]:
+def pre_bounds(grid: BeatGrid, demand: ClipDemand) -> tuple[int, int]:
     avail_beats = int(demand.src_pre_available / (grid.interval * NOMINAL_SPEED))
     hi = max(1, min(PRE_BEATS_MAX, avail_beats))
     return min(PRE_BEATS_MIN, hi), hi
@@ -194,17 +194,17 @@ def plan_kill_accents(
     Clips are contiguous on the music timeline. Returns one plan per demand that
     fits in the song; trailing demands that run past the last beat are dropped.
     """
-    grid = _build_grid(beat_map, float(target_duration_sec))
+    grid = build_grid(beat_map, float(target_duration_sec))
     n_beats = len(grid.beats)
     base_gap = _base_gap(grid, demands, float(target_duration_sec))
     cut = max(0, min(int(start_beat_index), n_beats - 1))
     plans: list[ClipBeatPlan] = []
     for demand in demands:
-        pre_lo, pre_hi = _pre_bounds(grid, demand)
-        first = _pick_strong(grid, cut + pre_lo, cut + pre_hi, cut + min(PRE_BEATS_TARGET, pre_hi))
+        pre_lo, pre_hi = pre_bounds(grid, demand)
+        first = pick_strong(grid, cut + pre_lo, cut + pre_hi, cut + min(PRE_BEATS_TARGET, pre_hi))
         kills = [first]
         for gap in demand.src_kill_gaps:
-            kills.append(_next_kill_beat(grid, kills[-1], float(gap)))
+            kills.append(next_kill_beat(grid, kills[-1], float(gap)))
         post = max(POST_BEATS_MIN, _gap_beats(grid, kills[-1], base_gap) - PRE_BEATS_TARGET)
         end = kills[-1] + post
         if end >= n_beats or first <= cut:

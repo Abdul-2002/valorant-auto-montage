@@ -49,6 +49,30 @@ def test_should_reserve_edge_glow_for_cinematic() -> None:
     assert _effects("punch").edge_glow is None
 
 
+def test_should_move_the_camera_on_every_recipe() -> None:
+    for recipe in ("clean", "punch", "slow", "cinematic"):
+        cam = _effects(recipe).camera
+        assert cam is not None and cam.enabled
+    assert _effects("punch").camera.crash_zoom > 0.0
+    assert _effects("slow").camera.push_in > 0.0
+    assert _effects("clean").zoom is None
+    assert _effects("punch").shake is None
+
+
+def test_should_enable_pip_only_when_a_style_is_budgeted() -> None:
+    bare = _effects("slow")
+    assert bare.pip_inset is None
+    pip = map_effects(
+        inp=EffectMappingInput(score=0.9, arc_phase="build"),
+        creative_config={},
+        brief=None,
+        recipe="slow",
+        pip_style="freeze_inset",
+    )
+    assert pip.pip_inset is not None and pip.pip_inset.enabled
+    assert pip.pip_inset.style == "freeze_inset"
+
+
 def test_should_cap_cinematic_and_default_to_slow_when_undirected() -> None:
     n = 16
     recipes = assign_recipes(scores=[0.5 + i / 40 for i in range(n)], phases=["climax"] * n)
@@ -82,7 +106,7 @@ def test_should_hit_later_kills_of_a_burst_harder() -> None:
 
 def test_should_brighten_frame_when_flash_blur_hit_fires() -> None:
     frame = np.full((108, 192, 3), 60, dtype=np.uint8)
-    out = KillHitEffect(style="flash_blur", flash_strength=0.5)._hit(frame, 1.0, 0)
+    out = KillHitEffect(style="flash_blur", flash_strength=0.5)._hit(frame, 1.0)
     assert out.mean() > frame.mean() + 40
 
 

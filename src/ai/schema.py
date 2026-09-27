@@ -5,13 +5,16 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 from src.config.models import (
+    CameraEffectConfig,
     ColorGradingEffectConfig,
     DeathPipEffectConfig,
     EdgeGlowEffectConfig,
     FreezeFrameEffectConfig,
+    GhostFreezeEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
     LensDistortEffectConfig,
+    PipInsetEffectConfig,
     LetterboxEffectConfig,
     LightWrapEffectConfig,
     MotionBlurEffectConfig,
@@ -119,6 +122,9 @@ class ScriptTransition(BaseModel):
 
 class ScriptClipEffects(BaseModel):
     velocity: Optional[VelocityEffectConfig] = None
+    camera: Optional[CameraEffectConfig] = None
+    ghost_freeze: Optional[GhostFreezeEffectConfig] = None
+    pip_inset: Optional[PipInsetEffectConfig] = None
     zoom: Optional[ZoomEffectConfig] = None
     shake: Optional[ShakeEffectConfig] = None
     color_grading: Optional[ColorGradingEffectConfig] = None
@@ -157,6 +163,10 @@ class ScriptClip(BaseModel):
     recipe: str = "clean"
     hit_style: str = "flash_blur"
     scoped: bool = False
+    # Strong beats inside the clip (relative to output_start_sec) for camera pulses.
+    accent_beats_sec: list[float] = Field(default_factory=list)
+    pip_style: str = ""
+    ghost_candidate: bool = False
     effects: ScriptClipEffects = Field(default_factory=ScriptClipEffects)
     transition_to_next: Optional[ScriptTransition] = None
     arc_phase: Literal["intro", "build", "climax", "outro"] = "build"

@@ -124,6 +124,30 @@ def _trim_music_to_script_phase(music: AudioSegment, offset_sec: float) -> Audio
     return music[off_ms:]
 
 
+def _clip_runtime_config(
+    clip_config: dict[str, Any],
+    *,
+    script: MontageScript,
+    index: int,
+    video_path: Path,
+    kill_outs: tuple[float, ...],
+) -> dict[str, Any]:
+    """Per-clip keys the camera / PiP effects read from EffectContext.config."""
+    sc = script.clips[index]
+    clip_config["_video_path"] = str(video_path)
+    clip_config["_kill_src_sec"] = float(sc.kill_timestamp_sec)
+    clip_config["_accent_beats"] = list(sc.accent_beats_sec)
+    vel = sc.effects.velocity
+    if vel is not None and float(vel.kill_slowmo_duration_sec) > 0.0 and kill_outs:
+        start = float(kill_outs[-1])
+        clip_config["_slowmo_window"] = [start, start + float(vel.kill_slowmo_duration_sec)]
+    if index > 0 and script.clips[index - 1].transition_to_next is not None:
+        clip_config["_transition_in"] = str(script.clips[index - 1].transition_to_next.type)
+    if sc.transition_to_next is not None:
+        clip_config["_transition_out"] = str(sc.transition_to_next.type)
+    return clip_config
+
+
 def _tint_head(clip: Any, *, color: tuple[int, int, int], duration_sec: float) -> Any:
     """Blend the first ``duration_sec`` of a clip toward a flat color (flash effect).
 
@@ -225,6 +249,8 @@ def render_montage(
     config: AppConfig,
     out_dir: Path,
     script: MontageScript | None = None,
+    beat_map: Any | None = None,
+    song_title: str = "",
     task_progress_cb: Callable[[float], None] | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -327,6 +353,9 @@ def render_montage(
                 kill_outs = tuple(float(k) for k in sc.kill_output_times_sec)
                 if kill_outs:
                     beat_ts = kill_outs[-1]
+                clip_config = _clip_runtime_config(
+                    clip_config, script=script, index=i, video_path=vpath, kill_outs=kill_outs
+                )
 
             ctx = EffectContext(
                 clip=vclip,
@@ -420,6 +449,22 @@ def render_montage(
 
         assembled = concatenate_videoclips(styled, method="compose")
 
+        if config.overlays.enabled and script is not None:
+            from src.pipeline.montage_overlays import apply_montage_overlays, build_overlay_plan
+
+            phase = float(_script_music_phase_offset_sec(script) or 0.0)
+            assembled = apply_montage_overlays(
+                assembled,
+                build_overlay_plan(
+                    script=script,
+                    beat_map=beat_map,
+                    cfg=config.overlays,
+                    song_title=song_title or (music_path.stem if music_path is not None else ""),
+                    phase_sec=phase,
+                ),
+                config.overlays,
+            )
+
         # Audio pipeline
         audio_pack: dict[str, AudioSegment | None] = {"music": None, "game": None, "mixed": None}
         music_phase_sec = _script_music_phase_offset_sec(script)
@@ -501,6 +546,9 @@ def render_montage(
                         delta_dur,
                     )
             mixed = audio_pack["mixed"][: int(max(0.0, assembled_dur) * 1000)]
+            # Cold open: music_edit starts on the first downbeat at full energy.
+            # Fade in so the montage does not slam the listener mid-attack.
+            mixed = mixed.fade_in(800)
             # Outro: fade audio out and video to black so the montage ends
             # deliberately instead of stopping mid-phrase on a raw frame.
             mixed = mixed.fade_out(1800)

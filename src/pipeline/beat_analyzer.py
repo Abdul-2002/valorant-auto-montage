@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import librosa
 import numpy as np
+
+if TYPE_CHECKING:
+    from src.pipeline.song_structure import SongStructure
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,8 @@ class BeatMap:
     beat_strengths: list[float] = field(default_factory=list)
     # Seconds per RMS frame (hop_length / sr); 0.0 when unknown.
     rms_frame_sec: float = 0.0
+    # Bar starts (beat 1). Empty when only a beat tracker was available.
+    downbeat_times: list[float] = field(default_factory=list)
 
 
 def _rms_times(*, num_frames: int, sr: int, hop_length: int) -> list[float]:
@@ -143,6 +149,20 @@ def _beat_strengths(y: np.ndarray, sr: int, beat_times: list[float], hop_length:
     return [min(1.0, v / ref) for v in raw]
 
 
+_HOP_LENGTH = 512
+_FRAME_LENGTH = 2048
+
+
+def _normalized_rms(y: np.ndarray) -> np.ndarray:
+    rms = librosa.feature.rms(y=y, frame_length=_FRAME_LENGTH, hop_length=_HOP_LENGTH)[0]
+    return rms / (np.max(rms) + 1e-9)
+
+
+def _section_energy(rms: np.ndarray, frame_sec: float, start: float, end: float) -> float:
+    a, b = int(start / frame_sec), max(int(start / frame_sec) + 1, int(end / frame_sec))
+    return float(np.mean(rms[a:b])) if a < rms.size else 0.0
+
+
 def analyze_beats(audio_path: Path, *, start_bpm: float = 120.0, tightness: int = 100) -> BeatMap:
     y, sr = librosa.load(str(audio_path), sr=None, mono=True)
     if y.size == 0:
@@ -153,11 +173,8 @@ def analyze_beats(audio_path: Path, *, start_bpm: float = 120.0, tightness: int 
     beat_times_list = [float(x) for x in np.atleast_1d(beats).tolist()]
     strengths = _beat_strengths(y, int(sr), beat_times_list)
 
-    hop_length = 512
-    frame_length = 2048
-    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
-    rms = rms / (np.max(rms) + 1e-9)
-    rms_times = _rms_times(num_frames=int(rms.size), sr=int(sr), hop_length=int(hop_length))
+    rms = _normalized_rms(y)
+    rms_times = _rms_times(num_frames=int(rms.size), sr=int(sr), hop_length=_HOP_LENGTH)
     sections = _detect_sections(rms_times, [float(x) for x in rms.tolist()])
 
     return BeatMap(
@@ -167,5 +184,31 @@ def analyze_beats(audio_path: Path, *, start_bpm: float = 120.0, tightness: int 
         rms=[float(x) for x in rms.tolist()],
         sections=sections,
         beat_strengths=strengths,
-        rms_frame_sec=float(hop_length) / float(sr),
+        rms_frame_sec=float(_HOP_LENGTH) / float(sr),
+    )
+
+
+def beat_map_from_structure(audio_path: Path, structure: "SongStructure") -> BeatMap:
+    """BeatMap on a (possibly edited) track whose beats/downbeats/sections are already known."""
+    y, sr = librosa.load(str(audio_path), sr=None, mono=True)
+    rms = _normalized_rms(y)
+    frame_sec = float(_HOP_LENGTH) / float(sr)
+    sections = [
+        BeatSection(
+            start_sec=float(s.start_sec),
+            end_sec=float(s.end_sec),
+            section_type=str(s.label),
+            avg_energy=_section_energy(rms, frame_sec, s.start_sec, s.end_sec),
+        )
+        for s in structure.segments
+    ]
+    return BeatMap(
+        tempo_bpm=float(structure.bpm),
+        beat_times=list(structure.beats),
+        onset_times=[],
+        rms=[float(x) for x in rms.tolist()],
+        sections=sections,
+        beat_strengths=_beat_strengths(y, int(sr), list(structure.beats)),
+        rms_frame_sec=frame_sec,
+        downbeat_times=list(structure.downbeats),
     )

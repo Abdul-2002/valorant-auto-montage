@@ -4,6 +4,28 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from src.config.effect_models import (  # noqa: F401  (re-exported for existing imports)
+    CameraEffectConfig,
+    ColorGradingEffectConfig,
+    DeathPipEffectConfig,
+    EdgeGlowEffectConfig,
+    EffectsConfig,
+    FreezeFrameEffectConfig,
+    GhostFreezeEffectConfig,
+    HighlightBloomEffectConfig,
+    KillHitEffectConfig,
+    LensDistortEffectConfig,
+    LetterboxEffectConfig,
+    LightWrapEffectConfig,
+    MotionBlurEffectConfig,
+    PipInsetEffectConfig,
+    RgbSplitEffectConfig,
+    ScopeVignetteEffectConfig,
+    ShakeEffectConfig,
+    VelocityEffectConfig,
+    ZoomEffectConfig,
+)
+
 
 class OutputConfig(BaseModel):
     target_duration_sec: int = Field(ge=5, le=60 * 30, default=90)
@@ -11,179 +33,33 @@ class OutputConfig(BaseModel):
     resolution: str = Field(default="1920x1080")
     fps: int = Field(ge=24, le=240, default=60)
     codec: str = Field(default="h264_nvenc")
+    # Without an explicit rate NVENC defaults to ~2 Mbps: blocky, soft gameplay.
+    video_bitrate: str = "16M"
+    vertical_bitrate: str = "10M"
+    # "procedural" writes the built-in teal/orange look; a path uses that .cube file; null disables.
+    lut: Optional[str] = "procedural"
+    lut_strength: float = Field(ge=0.0, le=1.0, default=0.6)
+    sharpen: float = Field(ge=0.0, le=2.0, default=0.5)
+    grain: int = Field(ge=0, le=30, default=5)
+    vignette: bool = True
+    audio_fade_out_sec: float = Field(ge=0.0, le=5.0, default=0.8)
+    video_fade_out_sec: float = Field(ge=0.0, le=5.0, default=0.8)
 
 
-class VelocityEffectConfig(BaseModel):
-    enabled: bool = True
-    # Post-kill slow-mo (Zishu style): speed right after the last kill of a clip.
-    kill_slowmo_factor: float = Field(gt=0.05, lt=1.0, default=0.4)
-    # Output seconds of post-kill slow-mo. 0.0 disables it (clean/punch recipes).
-    kill_slowmo_duration_sec: float = Field(ge=0.0, lt=5.0, default=0.9)
-    # Slow-mo never drops below this many distinct source frames per second
-    # (no frame interpolation: 60fps sources cap at 0.5x, 120fps at 0.25x).
-    slowmo_min_unique_fps: float = Field(ge=10.0, le=120.0, default=30.0)
-    approach_speed: float = Field(ge=0.5, le=2.0, default=1.15)
-    exit_speed: float = Field(ge=0.5, le=2.5, default=1.35)
-    transition_speedup_factor: float = Field(gt=0.25, lt=10.0, default=2.0)
-    easing: str = Field(default="ease_in_out_cubic")
-
-
-class ZoomEffectConfig(BaseModel):
-    enabled: bool = True
-    max_zoom: float = Field(ge=1.0, le=3.0, default=1.25)
-    duration_sec: float = Field(gt=0.01, lt=5.0, default=0.3)
-    # Fraction of the zoom window spent crashing IN (rest settles/zooms out).
-    crash_in_frac: float = Field(ge=0.15, le=0.85, default=0.35)
-    easing: str = Field(default="ease_out_quad")
-    center: Literal["screen_center", "kill_position"] = "screen_center"
-
-
-class ShakeEffectConfig(BaseModel):
-    enabled: bool = True
-    amplitude_px: int = Field(ge=0, le=50, default=6)
-    decay_rate: float = Field(gt=0.0, lt=1.0, default=0.85)
-    duration_frames: int = Field(ge=0, le=120, default=8)
-
-
-class ColorGradingEffectConfig(BaseModel):
-    enabled: bool = True
-    saturation: float = Field(gt=0.0, le=3.0, default=1.3)
-    contrast: float = Field(gt=0.0, le=3.0, default=1.1)
-    brightness: float = Field(ge=-1.0, le=1.0, default=0.02)
-    lut_file: Optional[str] = None
-
-
-class ScopeVignetteEffectConfig(BaseModel):
-    """Sniper-kill scope mask; the composer enables it only for scoped kills."""
-
-    enabled: bool = False
-    pre_sec: float = Field(gt=0.05, lt=2.0, default=0.35)
-    release_sec: float = Field(gt=0.02, lt=1.0, default=0.12)
-    # Closed-ring radius in half-screen-height units (1.0 touches top/bottom edges).
-    inner_radius: float = Field(ge=0.3, le=1.5, default=0.92)
-    darkness: float = Field(ge=0.0, le=1.0, default=0.92)
-    feather: float = Field(gt=0.0, le=0.5, default=0.05)
-
-
-class KillHitEffectConfig(BaseModel):
-    """Per-kill hit on the beat. flash_blur = brightness + lens blur decaying (Zishu)."""
+class OverlaysConfig(BaseModel):
+    """Montage-level overlays and text (kept inside the 9:16 center crop)."""
 
     enabled: bool = True
-    style: Literal["flash_blur", "glow", "flash_shake"] = "flash_blur"
-    decay_sec: float = Field(gt=0.05, lt=1.5, default=0.3)
-    flash_strength: float = Field(ge=0.0, le=1.0, default=0.5)
-    blur_px: float = Field(ge=0.0, le=64.0, default=16.0)
-    glow_threshold: float = Field(ge=0.2, le=0.95, default=0.55)
-    glow_blur_px: int = Field(ge=3, le=151, default=31)
-    glow_intensity: float = Field(ge=0.0, le=3.0, default=1.2)
-    shake_px: int = Field(ge=0, le=60, default=12)
-    # Strength of earlier kills in a multi-kill clip relative to the last one.
-    minor_scale: float = Field(ge=0.0, le=1.0, default=0.6)
-
-
-class EdgeGlowEffectConfig(BaseModel):
-    """Zishu find-edges + single-hue tritone + glow, blended back out after the kill."""
-
-    enabled: bool = False
-    hold_sec: float = Field(ge=0.0, lt=1.0, default=0.1)
-    fade_sec: float = Field(gt=0.05, lt=2.0, default=0.5)
-    mid_rgb: tuple[int, int, int] = (40, 140, 255)
-    highlight_rgb: tuple[int, int, int] = (210, 240, 255)
-    glow_threshold: float = Field(ge=0.0, le=0.95, default=0.3)
-    glow_blur_px: int = Field(ge=3, le=151, default=51)
-    glow_intensity: float = Field(ge=0.0, le=3.0, default=1.0)
-
-
-class DeathPipEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.1, lt=2.5, default=0.95)
-    scale: float = Field(ge=1.2, le=4.0, default=2.6)
-    size_frac: float = Field(ge=0.15, le=0.5, default=0.36)
-    margin_frac: float = Field(ge=0.01, le=0.1, default=0.025)
-    border_px: int = Field(ge=0, le=16, default=5)
-    desaturate: float = Field(ge=0.0, le=1.0, default=0.45)
-
-
-class FreezeFrameEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.02, lt=0.5, default=0.08)
-
-
-class MotionBlurEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=1.5, default=0.25)
-    amount_px: int = Field(ge=1, le=80, default=28)
-
-
-class LetterboxEffectConfig(BaseModel):
-    enabled: bool = False
-    bar_frac: float = Field(ge=0.02, le=0.2, default=0.08)
-    duration_sec: float = Field(gt=0.1, lt=5.0, default=1.2)
-
-
-class LensDistortEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=1.5, default=0.35)
-    strength: float = Field(ge=0.0, le=0.5, default=0.18)
-
-
-class RgbSplitEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.02, lt=1.0, default=0.18)
-    offset_px: int = Field(ge=1, le=20, default=4)
-
-
-class HighlightBloomEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.55)
-    luma_threshold: float = Field(ge=0.3, le=0.95, default=0.62)
-    blur_px: int = Field(ge=3, le=64, default=18)
-    intensity: float = Field(ge=0.0, le=2.0, default=0.85)
-    weapon_bias: float = Field(ge=0.0, le=1.0, default=0.35)
-
-
-class LightWrapEffectConfig(BaseModel):
-    enabled: bool = False
-    duration_sec: float = Field(gt=0.05, lt=2.0, default=0.4)
-    radius: float = Field(ge=0.15, le=1.2, default=0.55)
-    intensity: float = Field(ge=0.0, le=1.0, default=0.28)
-
-
-class EffectsConfig(BaseModel):
-    pipeline_order: list[str] = Field(
-        default_factory=lambda: [
-            "velocity",
-            "freeze_frame",
-            "zoom",
-            "shake",
-            "motion_blur",
-            "scope_vignette",
-            "death_pip",
-            "highlight_bloom",
-            "light_wrap",
-            "edge_glow",
-            "kill_hit",
-            "lens_distort",
-            "rgb_split",
-            "letterbox",
-            "color_grading",
-        ]
-    )
-    velocity: VelocityEffectConfig = Field(default_factory=VelocityEffectConfig)
-    zoom: ZoomEffectConfig = Field(default_factory=ZoomEffectConfig)
-    shake: ShakeEffectConfig = Field(default_factory=ShakeEffectConfig)
-    color_grading: ColorGradingEffectConfig = Field(default_factory=ColorGradingEffectConfig)
-    scope_vignette: ScopeVignetteEffectConfig = Field(default_factory=ScopeVignetteEffectConfig)
-    death_pip: DeathPipEffectConfig = Field(default_factory=DeathPipEffectConfig)
-    edge_glow: EdgeGlowEffectConfig = Field(default_factory=EdgeGlowEffectConfig)
-    kill_hit: KillHitEffectConfig = Field(default_factory=KillHitEffectConfig)
-    freeze_frame: FreezeFrameEffectConfig = Field(default_factory=FreezeFrameEffectConfig)
-    motion_blur: MotionBlurEffectConfig = Field(default_factory=MotionBlurEffectConfig)
-    letterbox: LetterboxEffectConfig = Field(default_factory=LetterboxEffectConfig)
-    lens_distort: LensDistortEffectConfig = Field(default_factory=LensDistortEffectConfig)
-    rgb_split: RgbSplitEffectConfig = Field(default_factory=RgbSplitEffectConfig)
-    highlight_bloom: HighlightBloomEffectConfig = Field(default_factory=HighlightBloomEffectConfig)
-    light_wrap: LightWrapEffectConfig = Field(default_factory=LightWrapEffectConfig)
+    light_leaks: bool = True
+    light_leak_strength: float = Field(ge=0.0, le=1.0, default=0.35)
+    flare_streaks: bool = True
+    flare_strength: float = Field(ge=0.0, le=2.0, default=0.8)
+    title_text: str = "VALORANT MONTAGE"
+    title_sec: float = Field(gt=0.5, le=10.0, default=3.2)
+    song_credit: bool = True
+    multi_kill_callouts: bool = True
+    # TTF/OTF font; empty tries Impact / Arial Bold / DejaVu Sans Bold.
+    font_path: str = ""
 
 
 class TransitionsConfig(BaseModel):
@@ -323,6 +199,7 @@ class DetectionConfig(BaseModel):
     auto_gaming_yolo: AutoGamingYoloConfig = Field(default_factory=AutoGamingYoloConfig)
     audio_peaks: AudioPeaksConfig = Field(default_factory=AudioPeaksConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    sam_model_path: str = "models/sam2.1_t.pt"
 
 
 class CreativeConfig(BaseModel):
@@ -371,6 +248,7 @@ class AIDirectorConfig(BaseModel):
 class AppConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     effects: EffectsConfig = Field(default_factory=EffectsConfig)
+    overlays: OverlaysConfig = Field(default_factory=OverlaysConfig)
     transitions: TransitionsConfig = Field(default_factory=TransitionsConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
     detection: DetectionConfig = Field(default_factory=DetectionConfig)

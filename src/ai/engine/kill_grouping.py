@@ -8,7 +8,7 @@ its own beat, is how editors cut multi-kills.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 from src.ai.enrichment import EnrichedEvent
 from src.pipeline.beat_layout import GAP_BEATS_MIN, NOMINAL_SPEED, ClipDemand
@@ -89,11 +89,16 @@ def _min_output_sec(group: KillGroup, beat_interval: float) -> float:
 
 
 def fit_groups_to_duration(
-    groups: Sequence[KillGroup], *, target_sec: float, beat_interval: float
+    groups: Sequence[KillGroup],
+    *,
+    target_sec: float,
+    beat_interval: float,
+    min_clip_sec: Callable[[KillGroup], float] | None = None,
 ) -> list[KillGroup]:
     """Drop the weakest bursts until the tightest possible layout fits ``target_sec``."""
+    cost = min_clip_sec or (lambda g: _min_output_sec(g, beat_interval))
     kept = list(groups)
-    while len(kept) > 1 and sum(_min_output_sec(g, beat_interval) for g in kept) > target_sec:
+    while len(kept) > 1 and sum(cost(g) for g in kept) > target_sec:
         kept.remove(min(kept, key=_group_value))
     return kept
 

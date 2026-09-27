@@ -18,6 +18,9 @@ class ClipDirection:
     recipe: str
     hit_style: str
     arc_phase: str
+    pip_style: str = ""
+    ghost_candidate: bool = False
+    accent_beats: tuple[float, ...] = ()
 
 
 def build_script_clip(
@@ -55,6 +58,7 @@ def build_script_clip(
         hit_style=direction.hit_style,
         scoped=group.scoped,
         slowmo_factor=factor,
+        pip_style=direction.pip_style,
     )
     return ScriptClip(
         video_index=group.video_index,
@@ -70,6 +74,9 @@ def build_script_clip(
         recipe=direction.recipe,
         hit_style=direction.hit_style,
         scoped=group.scoped,
+        accent_beats_sec=list(direction.accent_beats),
+        pip_style=direction.pip_style,
+        ghost_candidate=direction.ghost_candidate,
         effects=effects,
         arc_phase=direction.arc_phase,  # type: ignore[arg-type]
     )
