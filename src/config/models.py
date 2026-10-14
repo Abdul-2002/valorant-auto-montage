@@ -12,6 +12,7 @@ from src.config.effect_models import (  # noqa: F401  (re-exported for existing 
     EffectsConfig,
     FreezeFrameEffectConfig,
     GhostFreezeEffectConfig,
+    GunOutlineEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
     LensDistortEffectConfig,
@@ -54,10 +55,15 @@ class OverlaysConfig(BaseModel):
     light_leak_strength: float = Field(ge=0.0, le=1.0, default=0.35)
     flare_streaks: bool = True
     flare_strength: float = Field(ge=0.0, le=2.0, default=0.8)
-    title_text: str = "VALORANT MONTAGE"
-    title_sec: float = Field(gt=0.5, le=10.0, default=3.2)
+    # Empty disables the opening title card (preferred when lyric/kill callouts carry the brand).
+    title_text: str = ""
+    title_sec: float = Field(gt=0.5, le=10.0, default=2.4)
     song_credit: bool = True
+    # Flash "KILL" on every elim (off by default — too spammy for Zishu-style edits).
+    per_kill_callouts: bool = False
     multi_kill_callouts: bool = True
+    # Timed lyric/hook lines from the music-understanding layer (P2).
+    lyrics_overlays: bool = True
     # TTF/OTF font; empty tries Impact / Arial Bold / DejaVu Sans Bold.
     font_path: str = ""
 

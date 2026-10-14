@@ -6,9 +6,23 @@ from src.ai.schema import ScriptTransition
 from src.pipeline.beat_analyzer import BeatMap
 
 HIGH_ENERGY = frozenset({"chorus", "drop", "inst", "solo"})
-_ENERGY_ROTATION = ("zoom_in", "whip_pan", "spin", "hard_cut")
-_CALM_ROTATION = ("hard_cut", "push", "hard_cut", "zoom_in")
-_DURATIONS = {"flash_white": 0.05, "whip_pan": 0.14, "push": 0.12, "zoom_in": 0.14, "spin": 0.16, "hard_cut": 0.12}
+# Jigsaw + pop_slam from trending Valorant montage tutorials (YT refs in motion_style / jigsaw).
+_ENERGY_ROTATION = ("jigsaw", "pop_slam", "whip_pan", "jigsaw", "zoom_in", "spin")
+_CALM_ROTATION = ("hard_cut", "push", "hard_cut", "pop_slam")
+_DURATIONS = {
+    "flash_white": 0.05,
+    "whip_pan": 0.14,
+    "push": 0.12,
+    "zoom_in": 0.14,
+    "spin": 0.16,
+    "hard_cut": 0.12,
+    "pop_slam": 0.22,
+}
+
+MAX_SCENE_JIGSAWS = 5
+# Same-VOD kills this far apart are different rounds, so the incoming elements differ.
+_NEW_SCENE_GAP_SEC = 30.0
+_FALLBACK_BEAT_SEC = 0.43
 
 
 @dataclass(frozen=True)
@@ -31,33 +45,66 @@ def _pick(boundary_label: str, prev_label: str, k: int, flash_ok: bool) -> str:
     return _CALM_ROTATION[k % len(_CALM_ROTATION)]
 
 
+def _is_new_scene(a: tuple[int, float], b: tuple[int, float]) -> bool:
+    return a[0] != b[0] or abs(float(b[1]) - float(a[1])) >= _NEW_SCENE_GAP_SEC
+
+
+def scene_jigsaw_slots(kinds: list[str], clip_sources: list[tuple[int, float]]) -> set[int]:
+    """Extra jigsaw cuts on scene changes: never a flash cut, never next to another jigsaw."""
+    taken = [i for i, k in enumerate(kinds) if k == "jigsaw"]
+    picked: list[int] = []
+    for i in range(len(kinds) - 1):
+        if kinds[i] in ("flash_white", "jigsaw") or i + 1 >= len(clip_sources):
+            continue
+        if not _is_new_scene(clip_sources[i], clip_sources[i + 1]):
+            continue
+        if any(abs(i - j) < 2 for j in taken + picked):
+            continue
+        picked.append(i)
+    if len(picked) <= MAX_SCENE_JIGSAWS:
+        return set(picked)
+    step = len(picked) / MAX_SCENE_JIGSAWS
+    return {picked[int(k * step)] for k in range(MAX_SCENE_JIGSAWS)}
+
+
 def plan_transitions(
     *,
     num_clips: int,
     beat_map: BeatMap | None,
     clip_output_starts_sec: list[float] | None = None,
     flash_frequency: float,
+    clip_sources: list[tuple[int, float]] | None = None,
+    scene_jigsaw: bool = False,
+    beat_interval_sec: float | None = None,
 ) -> TransitionPlan:
     """Section-aware transitions: flash into big sections, motion transitions inside them.
 
-    The cut into the finale is always a zoom-through so the closing play lands hard.
+    The cut into the finale is always a jigsaw so the closing play lands hard,
+    and the cut before it never is. Jigsaws span one beat (``beat_interval_sec``);
+    with ``scene_jigsaw`` (reference style) scene changes get extra jigsaws.
     """
     if num_clips <= 0:
         return TransitionPlan(transitions_to_next=[])
     starts = clip_output_starts_sec or [float(i) for i in range(num_clips)]
     flash_ok = float(flash_frequency) > 0.0
-    out: list[ScriptTransition | None] = []
+    kinds: list[str] = []
     counters: dict[bool, int] = {True: 0, False: 0}
     for i in range(num_clips - 1):
         boundary = float(starts[i + 1]) if i + 1 < len(starts) else 0.0
         label = _section_type_at(beat_map, boundary)
         prev = _section_type_at(beat_map, float(starts[i]))
         if i == num_clips - 2:
-            kind = "zoom_in"
-        else:
-            energy = label in HIGH_ENERGY
-            kind = _pick(label, prev, counters[energy], flash_ok)
-            counters[energy] += 1
-        out.append(ScriptTransition(type=kind, duration_sec=_DURATIONS[kind]))
+            kinds.append("jigsaw")
+            continue
+        energy = label in HIGH_ENERGY
+        kind = _pick(label, prev, counters[energy], flash_ok)
+        counters[energy] += 1
+        kinds.append("pop_slam" if kind == "jigsaw" and i == num_clips - 3 else kind)
+    for i in scene_jigsaw_slots(kinds, clip_sources) if scene_jigsaw and clip_sources else ():
+        kinds[i] = "jigsaw"
+    beat = float(beat_interval_sec or _FALLBACK_BEAT_SEC)
+    out: list[ScriptTransition | None] = [
+        ScriptTransition(type=kind, duration_sec=beat if kind == "jigsaw" else _DURATIONS[kind]) for kind in kinds
+    ]
     out.append(None)
     return TransitionPlan(transitions_to_next=out)

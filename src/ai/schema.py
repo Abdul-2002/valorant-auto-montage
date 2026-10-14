@@ -11,6 +11,7 @@ from src.config.models import (
     EdgeGlowEffectConfig,
     FreezeFrameEffectConfig,
     GhostFreezeEffectConfig,
+    GunOutlineEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
     LensDistortEffectConfig,
@@ -118,6 +119,8 @@ class CreativeBrief(BaseModel):
 class ScriptTransition(BaseModel):
     type: str = "hard_cut"
     duration_sec: float = Field(gt=0.0, lt=2.0, default=0.15)
+    # jigsaw: incoming clip's piece label map PNG (fixed layout when absent).
+    asset_path: Optional[str] = None
 
 
 class ScriptClipEffects(BaseModel):
@@ -139,6 +142,7 @@ class ScriptClipEffects(BaseModel):
     rgb_split: Optional[RgbSplitEffectConfig] = None
     highlight_bloom: Optional[HighlightBloomEffectConfig] = None
     light_wrap: Optional[LightWrapEffectConfig] = None
+    gun_outline: Optional[GunOutlineEffectConfig] = None
 
 
 class ScriptClip(BaseModel):
@@ -167,6 +171,7 @@ class ScriptClip(BaseModel):
     accent_beats_sec: list[float] = Field(default_factory=list)
     pip_style: str = ""
     ghost_candidate: bool = False
+    gun_candidate: bool = False
     effects: ScriptClipEffects = Field(default_factory=ScriptClipEffects)
     transition_to_next: Optional[ScriptTransition] = None
     arc_phase: Literal["intro", "build", "climax", "outro"] = "build"

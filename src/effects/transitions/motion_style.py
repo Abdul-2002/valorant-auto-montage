@@ -86,3 +86,30 @@ def style_push_head(clip: Any, *, duration_sec: float) -> Any:
         return out
 
     return clip.transform(transform)
+
+
+def style_pop_slam_head(clip: Any, *, duration_sec: float) -> Any:
+    """Trending companion: overscale slam-in that settles (second common montage punch).
+
+    Inspired by no-plugin trending Valorant montage punches
+    (https://www.youtube.com/watch?v=H1bGw3pLH0U).
+    """
+    base_dur = float(getattr(clip, "duration", 0.0) or 0.0)
+    d = min(max(0.06, float(duration_sec)), max(0.06, base_dur * 0.4))
+
+    def transform(get_frame, t):
+        frame = get_frame(t)
+        if float(t) >= d:
+            return frame
+        u = float(t) / d
+        # Start ~1.28x, ease to 1.0 with tiny overshoot.
+        z = 1.28 - 0.32 * (1.0 - (1.0 - u) ** 2)
+        if u > 0.8:
+            z = 1.0 - 0.03 * np.sin(((u - 0.8) / 0.2) * np.pi)
+        h, w = frame.shape[:2]
+        nh, nw = max(1, int(round(h / z))), max(1, int(round(w / z)))
+        y0, x0 = max(0, (h - nh) // 2), max(0, (w - nw) // 2)
+        crop = frame[y0 : y0 + nh, x0 : x0 + nw]
+        return cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return clip.transform(transform)

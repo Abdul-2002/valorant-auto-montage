@@ -50,7 +50,10 @@ def text_sprite(
     w, h = right - left + 2 * pad, bottom - top + 2 * pad
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     ImageDraw.Draw(img).text((pad - left, pad - top), text, font=font, fill=(*color, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-    sprite = np.asarray(img).astype(np.float32)
+    return _apply_glow(np.asarray(img).astype(np.float32), glow)
+
+
+def _apply_glow(sprite: np.ndarray, glow: tuple[int, int, int]) -> np.ndarray:
     halo = cv2.GaussianBlur(sprite[:, :, 3], (0, 0), 8.0)
     glow_layer = np.zeros_like(sprite)
     glow_layer[:, :, :3] = np.asarray(glow, dtype=np.float32)
@@ -60,6 +63,31 @@ def text_sprite(
     out[:, :, :3] = sprite[:, :, :3] * a + glow_layer[:, :, :3] * (1.0 - a)
     out[:, :, 3] = np.maximum(sprite[:, :, 3], glow_layer[:, :, 3])
     return np.clip(out, 0, 255).astype(np.uint8)
+
+
+@lru_cache(maxsize=16)
+def text_sprite_3d(
+    text: str,
+    *,
+    size: int,
+    color: tuple[int, int, int],
+    depth_color: tuple[int, int, int],
+    glow: tuple[int, int, int],
+    font_path: str = "",
+    depth_px: int = 12,
+) -> np.ndarray:
+    """Faux-3D title: extruded down-right layers behind the face, then stroke + glow."""
+    font = _font(font_path, _fit_size(text, font_path, size, SAFE_WIDTH_PX))
+    left, top, right, bottom = font.getbbox(text)
+    pad = 24 + depth_px
+    w, h = right - left + 2 * pad, bottom - top + 2 * pad
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    for d in range(depth_px, 0, -2):
+        shade = tuple(int(c * (0.55 + 0.45 * (1.0 - d / depth_px))) for c in depth_color)
+        draw.text((pad - left + d, pad - top + d), text, font=font, fill=(*shade, 255))
+    draw.text((pad - left, pad - top), text, font=font, fill=(*color, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
+    return _apply_glow(np.asarray(img).astype(np.float32), glow)
 
 
 def composite(frame: np.ndarray, sprite: np.ndarray, *, cx: float, cy: float, alpha: float, scale: float = 1.0) -> np.ndarray:

@@ -13,6 +13,7 @@ from src.ai.enrichment import enrich_events
 from src.ai.providers import safe_generate_brief
 from src.ai.providers.base import BriefContext
 from src.pipeline.highlight_detector import detect_highlights
+from src.pipeline.jigsaw_assets import attach_jigsaw_pieces
 from src.pipeline.kill_assets import attach_ghost_cutouts
 from src.pipeline.montage_assembler import render_montage
 from src.pipeline.music_edit import prepare_edited_track
@@ -115,9 +116,32 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
             events = [DetectedEvent.model_validate(x) for x in confirmed["highlights"]]
             enriched, _durations = enrich_events(highlights=events, video_paths=[Path(p) for p in meta["videos"]])
             creative_cfg = config.ai_director.creative_config.model_dump(mode="json")
+            from src.pipeline.lyrics_align import analyze_lyric_events
+            from src.ai.play_labels import label_multi_kills
+
+            lyric_events = tuple(
+                analyze_lyric_events(
+                    music_for_render,
+                    beat_map,
+                    song_title=Path(str(meta.get("music", "song"))).stem,
+                    prefer_asr=True,
+                    cache_dir=tdir / "song",
+                )
+            )
+            play_labels = label_multi_kills(
+                enriched=enriched,
+                video_paths=[Path(p) for p in meta["videos"]],
+                api_key=str(getattr(config.ai_director.gemini, "api_key", "") or ""),
+            )
             brief = safe_generate_brief(
                 cfg=config.ai_director,
-                ctx=BriefContext(enriched_events=enriched, beat_map=beat_map, creative_config_resolved=creative_cfg),
+                ctx=BriefContext(
+                    enriched_events=enriched,
+                    beat_map=beat_map,
+                    creative_config_resolved=creative_cfg,
+                    lyric_events=lyric_events,
+                    play_labels=play_labels or None,
+                ),
             )
         except Exception:
             brief = None
@@ -133,6 +157,13 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
 
     w, h = (int(x) for x in str(config.output.resolution).lower().split("x"))
     script = attach_ghost_cutouts(
+        script,
+        video_paths=[Path(p) for p in meta["videos"]],
+        out_dir=tdir,
+        resolution=(w, h),
+        sam_model_path=Path(config.detection.sam_model_path),
+    )
+    script = attach_jigsaw_pieces(
         script,
         video_paths=[Path(p) for p in meta["videos"]],
         out_dir=tdir,

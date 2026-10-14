@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -11,8 +12,24 @@ import numpy as np
 
 from src.detection.base import DetectionContext, Detector
 from src.detection.registry import register_detector
+from src.pipeline.types import DetectedEvent
 
 log = logging.getLogger(__name__)
+
+# Kill banner box straddles the screen centre under the crosshair, so a banner
+# pop is mirror-symmetric inside it; bodies, tracers and camera turns are not.
+_BANNER_X0 = 0.475
+_BANNER_Y = (0.72, 0.84)
+_NEIGHBOR_X0 = (0.36, 0.59)
+_NEIGHBOR_W = 0.05
+_ONSET_ANALYSIS_SIZE = (960, 540)
+_ONSET_DIFF_HZ = 30.0
+_POP_MIN_DIFF = 6.0
+_POP_MIN_LOCAL_RATIO = 1.5
+_POP_MIN_SYMMETRY = 0.45
+ONSET_LOOKBACK_SEC = 0.6
+# Kill stamps land at or after the banner; a later "pop" is its ring animation.
+_ONSET_MAX_LATE_SEC = 1.0 / 30.0
 
 # Valorant kill skull sits in the lower-center HUD band under the crosshair.
 _KILL_ICON_REGION = (0.40, 0.45, 0.60, 0.78)
@@ -193,3 +210,97 @@ class KillFrameRefineDetector(Detector):
             rejected_death,
         )
         return out
+
+
+def _banner_band(img: np.ndarray, x0: float, x1: float) -> np.ndarray:
+    h, w = img.shape[:2]
+    return img[int(h * _BANNER_Y[0]) : int(h * _BANNER_Y[1]), int(round(w * x0)) : int(round(w * x1))]
+
+
+def mirror_symmetry(patch: np.ndarray) -> float:
+    """Pearson correlation of a patch with its left-right mirror (1.0 = symmetric)."""
+    a = patch.astype(np.float32) - float(patch.mean())
+    m = a[:, ::-1]
+    den = float(np.sqrt((a * a).sum() * (m * m).sum()))
+    return float((a * m).sum() / den) if den > 1e-6 else 0.0
+
+
+def is_banner_pop(prev_gray: np.ndarray, gray: np.ndarray) -> bool:
+    """True when the change between two frames is a centred, symmetric HUD pop."""
+    diff = np.abs(gray.astype(np.float32) - prev_gray.astype(np.float32))
+    roi = _banner_band(diff, _BANNER_X0, 1.0 - _BANNER_X0)
+    local = float(roi.mean())
+    side = float(np.mean([_banner_band(diff, x, x + _NEIGHBOR_W).mean() for x in _NEIGHBOR_X0]))
+    if local < _POP_MIN_DIFF or local < _POP_MIN_LOCAL_RATIO * (side + 1.0):
+        return False
+    return mirror_symmetry(roi) >= _POP_MIN_SYMMETRY
+
+
+def _read_gray_window(cap: cv2.VideoCapture, start_sec: float, end_sec: float) -> list[tuple[float, np.ndarray]]:
+    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, start_sec) * 1000.0)
+    frames: list[tuple[float, np.ndarray]] = []
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        t = float(cap.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
+        if t > end_sec:
+            break
+        small = cv2.resize(frame, _ONSET_ANALYSIS_SIZE, interpolation=cv2.INTER_AREA)
+        frames.append((t, cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)))
+    return frames
+
+
+def first_banner_pop(frames: list[tuple[float, np.ndarray]], *, earliest_sec: float) -> float | None:
+    """Time of the first banner pop at or after ``earliest_sec`` (diffs taken at ~30 Hz)."""
+    if len(frames) < 2:
+        return None
+    fps = (len(frames) - 1) / max(1e-6, frames[-1][0] - frames[0][0])
+    step = max(1, int(round(fps / _ONSET_DIFF_HZ)))
+    for j in range(step, len(frames)):
+        t, gray = frames[j]
+        if t >= earliest_sec and is_banner_pop(frames[j - step][1], gray):
+            return t
+    return None
+
+
+def kill_banner_onset_sec(cap: cv2.VideoCapture, approx_sec: float, *, earliest_sec: float) -> float | None:
+    """Kill-banner onset in [max(earliest, approx - lookback), approx + 1 frame], or None."""
+    lo = max(float(earliest_sec), float(approx_sec) - ONSET_LOOKBACK_SEC)
+    hi = float(approx_sec) + _ONSET_MAX_LATE_SEC
+    return first_banner_pop(_read_gray_window(cap, lo - 0.1, hi), earliest_sec=lo)
+
+
+def snap_kills_to_banner(highlights: list[DetectedEvent], video_paths: list[Path]) -> list[DetectedEvent]:
+    """Move late kill stamps back to the on-screen kill-banner onset; keep the rest.
+
+    The beat planner pins ``timestamp_sec`` to a beat, so a stamp 300 ms after
+    the banner puts the visible kill a beat-fraction early in the montage.
+    """
+    out = list(highlights)
+    by_video: dict[int, list[int]] = {}
+    for i, ev in enumerate(out):
+        if ev.event_type == "kill" and 0 <= ev.video_index < len(video_paths):
+            by_video.setdefault(ev.video_index, []).append(i)
+    moved = 0
+    for vid, idxs in by_video.items():
+        cap = cv2.VideoCapture(str(video_paths[vid]))
+        if not cap.isOpened():
+            log.warning("kill_frame_refine: cannot open %s; kill stamps left unsnapped", video_paths[vid])
+            continue
+        try:
+            prev: float | None = None
+            for i in sorted(idxs, key=lambda k: out[k].timestamp_sec):
+                ts = float(out[i].timestamp_sec)
+                earliest = 0.0 if prev is None else 0.5 * (prev + ts)
+                prev = ts
+                onset = kill_banner_onset_sec(cap, ts, earliest_sec=earliest)
+                if onset is None or abs(onset - ts) < 1e-3:
+                    continue
+                log.info("kill_frame_refine: video %d kill %.3fs -> banner onset %.3fs", vid, ts, onset)
+                out[i] = out[i].model_copy(update={"timestamp_sec": float(onset)})
+                moved += 1
+        finally:
+            cap.release()
+    log.warning("kill_frame_refine: snapped %d/%d kill stamps to banner onset", moved, sum(map(len, by_video.values())))
+    return out

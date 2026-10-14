@@ -35,6 +35,11 @@ def resolve_ffmpeg_exe() -> str:
     raise RuntimeError("ffmpeg not found; install ffmpeg or set FFMPEG_BINARY")
 
 
+# pydub's export() spawns AudioSegment.converter ("ffmpeg" on PATH by default);
+# point it at the resolved binary so renders work from non-activated shells.
+AudioSegment.converter = resolve_ffmpeg_exe()
+
+
 def load_audio_segment(path: str | Path, *, sample_rate: int = 44100) -> AudioSegment:
     """
     Load audio into pydub without relying on ffprobe.

@@ -20,7 +20,7 @@ from src.config.models import AppConfig
 from src.effects.base import EffectContext
 from src.effects.registry import get_audio_effect, get_clip_effect
 from src.io.audio_loader import load_audio_segment
-from src.io.ffmpeg import crop_center_9x16_from_16x9
+from src.io.ffmpeg import crop_center_9x16_from_16x9, video_quality_args
 from src.pipeline.clip_sequencer import SelectedClip, select_clips
 from src.pipeline.types import DetectedEvent
 
@@ -409,11 +409,18 @@ def render_montage(
         # the music beat grid (the audio runs on an absolute timeline). Flash
         # transitions are rendered as a tint on the head of the next clip; whip/push
         # are duration-preserving motion styles on clip tails/heads.
-        from src.effects.transitions.motion_style import style_push_head, style_whip_head, style_whip_tail
+        from src.effects.transitions.jigsaw import FALLBACK_BEAT_SEC, load_piece_labels, style_jigsaw_tail
+        from src.effects.transitions.motion_style import (
+            style_pop_slam_head,
+            style_push_head,
+            style_whip_head,
+            style_whip_tail,
+        )
 
         flash_dur = max(0.02, float(config.transitions.flash_duration_sec))
         whip_dur = max(0.05, float(getattr(config.transitions, "whip_duration_sec", 0.14) or 0.14))
         push_dur = max(0.05, float(getattr(config.transitions, "push_duration_sec", 0.12) or 0.12))
+        pop_dur = 0.22
         whoosh_times_sec: list[float] = []
         styled: list[Any] = []
         for idx, clip in enumerate(clips):
@@ -422,37 +429,64 @@ def render_montage(
                 prev_idx = idx - 1
                 if script is not None and prev_idx < len(script.clips) and script.clips[prev_idx].transition_to_next is not None:
                     t_name = str(script.clips[prev_idx].transition_to_next.type)
+                    t_dur = float(script.clips[prev_idx].transition_to_next.duration_sec)
                 else:
                     t_name = config.transitions.default_type if config.transitions.enabled else "hard_cut"
+                    t_dur = 0.0
 
                 if t_name == "flash_white":
                     nxt = _tint_head(nxt, color=(255, 255, 255), duration_sec=flash_dur)
                 elif t_name == "flash_black":
                     nxt = _tint_head(nxt, color=(0, 0, 0), duration_sec=flash_dur)
                 elif t_name == "whip_pan":
-                    nxt = style_whip_head(nxt, duration_sec=whip_dur)
+                    nxt = style_whip_head(nxt, duration_sec=whip_dur if t_dur <= 0 else t_dur)
                     whoosh_times_sec.append(sum(float(getattr(c, "duration", 0.0) or 0.0) for c in styled))
                 elif t_name == "push":
-                    nxt = style_push_head(nxt, duration_sec=push_dur)
+                    nxt = style_push_head(nxt, duration_sec=push_dur if t_dur <= 0 else t_dur)
+                elif t_name == "jigsaw":
+                    whoosh_times_sec.append(sum(float(getattr(c, "duration", 0.0) or 0.0) for c in styled))
+                elif t_name == "pop_slam":
+                    nxt = style_pop_slam_head(nxt, duration_sec=pop_dur if t_dur <= 0 else t_dur)
 
-            # Style whip on the outgoing tail before appending, when this clip
-            # transitions via whip_pan to the next.
             if idx < len(clips) - 1:
                 if script is not None and idx < len(script.clips) and script.clips[idx].transition_to_next is not None:
                     t_out = str(script.clips[idx].transition_to_next.type)
+                    t_out_dur = float(script.clips[idx].transition_to_next.duration_sec)
+                    t_out_asset = script.clips[idx].transition_to_next.asset_path
                 else:
                     t_out = config.transitions.default_type if config.transitions.enabled else "hard_cut"
+                    t_out_dur = 0.0
+                    t_out_asset = None
                 if t_out == "whip_pan":
-                    nxt = style_whip_tail(nxt, duration_sec=whip_dur)
+                    nxt = style_whip_tail(nxt, duration_sec=whip_dur if t_out_dur <= 0 else t_out_dur)
+                elif t_out == "jigsaw":
+                    nxt = style_jigsaw_tail(
+                        nxt,
+                        incoming_frame=clips[idx + 1].get_frame(0.0),
+                        labels=load_piece_labels(t_out_asset, w, h),
+                        beat_sec=FALLBACK_BEAT_SEC if t_out_dur <= 0 else t_out_dur,
+                    )
 
             styled.append(nxt)
 
         assembled = concatenate_videoclips(styled, method="compose")
 
         if config.overlays.enabled and script is not None:
+            from src.pipeline.lyrics_align import analyze_lyric_events
             from src.pipeline.montage_overlays import apply_montage_overlays, build_overlay_plan
 
             phase = float(_script_music_phase_offset_sec(script) or 0.0)
+            lyric_events = (
+                analyze_lyric_events(
+                    music_path,
+                    beat_map,
+                    song_title=song_title or (music_path.stem if music_path is not None else ""),
+                    prefer_asr=True,
+                    cache_dir=(music_path.parent if music_path is not None else None),
+                )
+                if config.overlays.lyrics_overlays
+                else []
+            )
             assembled = apply_montage_overlays(
                 assembled,
                 build_overlay_plan(
@@ -461,6 +495,7 @@ def render_montage(
                     cfg=config.overlays,
                     song_title=song_title or (music_path.stem if music_path is not None else ""),
                     phase_sec=phase,
+                    lyric_events=lyric_events,
                 ),
                 config.overlays,
             )
@@ -563,7 +598,14 @@ def render_montage(
         # NVENC requires an ffmpeg build with NVENC enabled; libx264 is a safe fallback.
         try:
             if codec == "h264_nvenc":
-                assembled.write_videofile(str(out_16), fps=fps, codec=codec, audio_codec="aac", preset="p4")
+                assembled.write_videofile(
+                    str(out_16),
+                    fps=fps,
+                    codec=codec,
+                    audio_codec="aac",
+                    preset="p4",
+                    ffmpeg_params=video_quality_args(codec),
+                )
             else:
                 assembled.write_videofile(str(out_16), fps=fps, codec=codec, audio_codec="aac", preset="medium")
         except OSError:
@@ -582,7 +624,14 @@ def render_montage(
                 cropped = _cropped(assembled, x_center=w // 2, y_center=h // 2, width=target_w, height=h)
                 try:
                     if codec == "h264_nvenc":
-                        cropped.write_videofile(str(out_9), fps=fps, codec=codec, audio_codec="aac", preset="p4")
+                        cropped.write_videofile(
+                            str(out_9),
+                            fps=fps,
+                            codec=codec,
+                            audio_codec="aac",
+                            preset="p4",
+                            ffmpeg_params=video_quality_args(codec),
+                        )
                     else:
                         cropped.write_videofile(str(out_9), fps=fps, codec=codec, audio_codec="aac", preset="medium")
                 except OSError:
