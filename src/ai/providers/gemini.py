@@ -120,6 +120,8 @@ class GeminiBriefProvider(BriefProvider):
             enriched_events=ctx.enriched_events,
             creative_config=ctx.creative_config_resolved,
             beat_map=ctx.beat_map,
+            lyric_events=list(ctx.lyric_events or ()),
+            play_labels=ctx.play_labels,
         )
 
         resp = self._generate_with_fallback(client, user_prompt)

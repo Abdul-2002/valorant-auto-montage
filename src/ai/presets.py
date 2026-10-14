@@ -52,6 +52,21 @@ PRESETS: dict[str, dict[str, Any]] = {
         "variety": 0.2,
         "arc_enabled": True,
     },
+    # Matches the reference samples in reference/fiverr-rafialihsan: glow-forward
+    # hits, motion transitions, heavy grade. "style_fx" is read by effect_mapper.
+    "rafialihsan": {
+        "pacing": 0.9,
+        "effect_intensity": 0.9,
+        "slowmo_bias": 0.7,
+        "flash_frequency": 0.7,
+        "shake_intensity": 0.85,
+        "zoom_aggression": 0.8,
+        "color_warmth": 0.6,
+        "beat_sync_strictness": 0.9,
+        "variety": 0.8,
+        "arc_enabled": True,
+        "style_fx": "reference",
+    },
 }
 
 

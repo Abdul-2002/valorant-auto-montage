@@ -11,6 +11,7 @@ effects:
     - velocity
     - ghost_freeze
     - freeze_frame
+    - gun_outline
     - camera
     - zoom
     - shake
@@ -167,15 +168,20 @@ effects:
     intensity: 0.28
 
 overlays:
+  # Title-only mode: faux-3D intro title + light leaks/flares (reference look).
+  # Lyrics/callouts stay off — they were hurting the cut more than helping.
+  # Set title_text to your gamer tag; empty string renders no title.
   enabled: true
   light_leaks: true
   light_leak_strength: 0.35
   flare_streaks: true
   flare_strength: 0.8
-  title_text: "VALORANT MONTAGE"
-  title_sec: 3.2
-  song_credit: true
-  multi_kill_callouts: true
+  title_text: ""
+  title_sec: 2.4
+  song_credit: false
+  per_kill_callouts: false
+  multi_kill_callouts: false
+  lyrics_overlays: false
 
 transitions:
   enabled: true
@@ -279,18 +285,18 @@ ai_director:
   enabled: true
   # Gemini only as creative director (effect recipes / pacing), not kill detection.
   provider: "gemini"
-  style_preset: "aggressive"
+  style_preset: "rafialihsan"
 
   creative_config:
-    pacing: 0.8
-    effect_intensity: 0.85
-    slowmo_bias: 0.6
-    flash_frequency: 0.65
-    shake_intensity: 0.55
-    zoom_aggression: 0.75
+    pacing: 0.9
+    effect_intensity: 0.9
+    slowmo_bias: 0.7
+    flash_frequency: 0.7
+    shake_intensity: 0.85
+    zoom_aggression: 0.8
     color_warmth: 0.6
     beat_sync_strictness: 0.9
-    variety: 0.7
+    variety: 0.8
     arc_enabled: true
 
   gemini:

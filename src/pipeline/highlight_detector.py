@@ -7,6 +7,7 @@ from typing import Callable
 from src.config.models import AppConfig
 from src.detection.base import DetectionContext
 from src.detection.event_scorer import ScoringWeights, score_and_merge
+from src.detection.kill_frame_refine import snap_kills_to_banner
 from src.detection.registry import get_detector
 from src.pipeline.types import DetectedEvent
 
@@ -246,7 +247,9 @@ def detect_highlights(
         audio_weight=config.detection.scoring.audio_weight,
         dedup_window_sec=config.detection.scoring.dedup_window_sec,
     )
-    highlights = score_and_merge(visual_events=all_visual, audio_events=all_audio, weights=weights)
+    highlights = snap_kills_to_banner(
+        score_and_merge(visual_events=all_visual, audio_events=all_audio, weights=weights), video_paths
+    )
 
     if task_progress_cb:
         task_progress_cb(0.95)

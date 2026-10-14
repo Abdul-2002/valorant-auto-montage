@@ -139,6 +139,9 @@ def _with_transitions(clips: list[ScriptClip], inp: ComposeInputs) -> list[Scrip
         beat_map=inp.beat_map,
         clip_output_starts_sec=[float(c.output_start_sec or 0.0) for c in clips],
         flash_frequency=float(inp.creative_config_resolved.get("flash_frequency", 0.4)),
+        clip_sources=[(c.video_index, float(c.kill_timestamp_sec)) for c in clips],
+        scene_jigsaw=str(inp.creative_config_resolved.get("style_fx", "")) == "reference",
+        beat_interval_sec=beat_interval(inp.beat_map),
     ).transitions_to_next
     return [
         c.model_copy(update={"transition_to_next": transitions[i]}) if i < len(transitions) else c
@@ -159,9 +162,16 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
     ).phases
     directed_recipes, directed_styles = _directed_treatments(inp.enriched_events, groups, inp.brief)
     recipes = assign_recipes(scores=[g.score for g in groups], phases=phases, directed=directed_recipes)
-    styles = assign_hit_styles(n=len(groups), directed=directed_styles)
+    styles = assign_hit_styles(
+        n=len(groups),
+        directed=directed_styles,
+        style_fx=str(inp.creative_config_resolved.get("style_fx", "")),
+    )
     features = assign_features(
-        recipes=recipes, kill_counts=[len(g.events) for g in groups], scores=[g.score for g in groups]
+        recipes=recipes,
+        kill_counts=[len(g.events) for g in groups],
+        scores=[g.score for g in groups],
+        style_fx=str(inp.creative_config_resolved.get("style_fx", "")),
     )
     clips = [
         build_script_clip(
@@ -173,6 +183,7 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
                 arc_phase=str(phases[i]),
                 pip_style=features[i].pip_style,
                 ghost_candidate=features[i].ghost_candidate,
+                gun_candidate=features[i].gun_candidate,
                 accent_beats=tuple(_accent_beats(inp.beat_map, p)),
             ),
             velocity=inp.velocity,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from src.ai.schema import CreativeBrief, ScriptClipEffects
 from src.ai.engine.feature_budget import PIP_STYLES
@@ -10,8 +10,12 @@ from src.config.models import (
     CameraEffectConfig,
     ColorGradingEffectConfig,
     EdgeGlowEffectConfig,
+    HighlightBloomEffectConfig,
     KillHitEffectConfig,
+    LensDistortEffectConfig,
+    MotionBlurEffectConfig,
     PipInsetEffectConfig,
+    RgbSplitEffectConfig,
     ScopeVignetteEffectConfig,
     VelocityEffectConfig,
 )
@@ -26,6 +30,8 @@ from src.effects.presets.valorant import get_preset
 Recipe = Literal["clean", "punch", "slow", "cinematic"]
 VALID_RECIPES: tuple[str, ...] = ("clean", "punch", "slow", "cinematic")
 HIT_STYLE_CYCLE: tuple[str, ...] = ("flash_blur", "flash_blur", "glow", "flash_shake")
+# Reference style (rafialihsan samples): glow on every other kill.
+REFERENCE_HIT_STYLE_CYCLE: tuple[str, ...] = ("flash_blur", "glow", "flash_shake", "glow")
 
 ZOOM_BUDGET_FRACTION: float = 0.45
 MAX_CINEMATIC: int = 2
@@ -106,9 +112,10 @@ def assign_recipes(
     return final
 
 
-def assign_hit_styles(*, n: int, directed: dict[int, str] | None = None) -> list[str]:
+def assign_hit_styles(*, n: int, directed: dict[int, str] | None = None, style_fx: str = "") -> list[str]:
     """Director-chosen hit styles, else a varied rotation (same hit on every kill reads as a template)."""
-    styles = [HIT_STYLE_CYCLE[i % len(HIT_STYLE_CYCLE)] for i in range(n)]
+    cycle = REFERENCE_HIT_STYLE_CYCLE if style_fx == "reference" else HIT_STYLE_CYCLE
+    styles = [cycle[i % len(cycle)] for i in range(n)]
     for i, s in (directed or {}).items():
         if 0 <= i < n and s in HIT_STYLE_CYCLE:
             styles[i] = s
@@ -139,6 +146,23 @@ def _pip_for(pip_style: str) -> PipInsetEffectConfig | None:
     return PipInsetEffectConfig(enabled=True, style=pip_style)  # type: ignore[arg-type]
 
 
+def _reference_extras(recipe: str, score: float) -> dict[str, Any]:
+    """Reference-style (rafialihsan) accents layered on top of the base recipe kit.
+
+    RGB split + directional blur sharpen fast punch cuts; distortion and bloom
+    stay on budgeted cinematic / high-score slow kills so they do not template.
+    """
+    extras: dict[str, Any] = {}
+    if recipe in ("punch", "cinematic"):
+        extras["rgb_split"] = RgbSplitEffectConfig(enabled=True, duration_sec=0.15, offset_px=5)
+        extras["motion_blur"] = MotionBlurEffectConfig(enabled=True, duration_sec=0.2, amount_px=24)
+    if recipe == "cinematic":
+        extras["lens_distort"] = LensDistortEffectConfig(enabled=True)
+    if recipe == "cinematic" or (recipe == "slow" and score >= 0.65):
+        extras["highlight_bloom"] = HighlightBloomEffectConfig(enabled=True)
+    return extras
+
+
 def map_effects(
     *,
     inp: EffectMappingInput,
@@ -161,14 +185,23 @@ def map_effects(
     color_keys = set(ColorGradingEffectConfig.model_fields) - {"enabled"}
     # ~AE Brightness +100 at intensity 0.85 (Zishu kill flash), scaled by style intensity.
     flash = min(0.5, max(0.2, 0.2 + 0.25 * intensity))
+    reference = creative_config.get("style_fx") == "reference"
+    extras = _reference_extras(recipe, float(inp.score)) if reference else {}
+    grade = {k: v for k, v in preset.color_grading.items() if k in color_keys}
+    if reference:
+        # Rafi samples read hotter/more saturated than the default intensity scale alone.
+        if isinstance(grade.get("saturation"), (int, float)):
+            grade["saturation"] = min(1.55, float(grade["saturation"]) * 1.12)
+        if isinstance(grade.get("contrast"), (int, float)):
+            grade["contrast"] = min(1.35, float(grade["contrast"]) * 1.08)
     return ScriptClipEffects(
         velocity=velocity,
         camera=_camera_for(recipe),
-        pip_inset=_pip_for(pip_style),
-        color_grading=ColorGradingEffectConfig.model_validate(
-            {"enabled": True, **{k: v for k, v in preset.color_grading.items() if k in color_keys}}
-        ),
+        # Reference path never gets PiP cards (feature_budget also zeroes pip_style).
+        pip_inset=None if reference else _pip_for(pip_style),
+        color_grading=ColorGradingEffectConfig.model_validate({"enabled": True, **grade}),
         kill_hit=KillHitEffectConfig(enabled=True, style=hit_style, flash_strength=flash),
         edge_glow=EdgeGlowEffectConfig(enabled=True) if recipe == "cinematic" else None,
         scope_vignette=ScopeVignetteEffectConfig(enabled=True) if scoped else None,
+        **extras,
     )

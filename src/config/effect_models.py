@@ -183,6 +183,23 @@ class LightWrapEffectConfig(BaseModel):
     intensity: float = Field(ge=0.0, le=1.0, default=0.28)
 
 
+class GunOutlineEffectConfig(BaseModel):
+    """Neon weapon outline through the post-kill slow-mo (reference-style rotoscope).
+
+    The contour is pre-rendered by pipeline.weapon_assets (SAM box prompt, validated);
+    without an asset the effect is a no-op.
+    """
+
+    enabled: bool = False
+    asset_path: Optional[str] = None
+    pre_sec: float = Field(gt=0.0, lt=0.5, default=0.1)
+    window_sec: float = Field(gt=0.1, lt=2.0, default=0.6)
+    glow_rgb: tuple[int, int, int] = (90, 220, 255)
+    thickness_px: int = Field(ge=1, le=12, default=3)
+    glow_blur_px: int = Field(ge=3, le=51, default=15)
+    max_alpha: float = Field(ge=0.1, le=1.0, default=0.9)
+
+
 class EffectsConfig(BaseModel):
     # Frame-space effects (ghost) before the camera moves the frame; screen-space
     # effects (flash, PiP card) after it so they stay stable.
@@ -191,6 +208,7 @@ class EffectsConfig(BaseModel):
             "velocity",
             "ghost_freeze",
             "freeze_frame",
+            "gun_outline",
             "camera",
             "zoom",
             "shake",
@@ -226,3 +244,4 @@ class EffectsConfig(BaseModel):
     rgb_split: RgbSplitEffectConfig = Field(default_factory=RgbSplitEffectConfig)
     highlight_bloom: HighlightBloomEffectConfig = Field(default_factory=HighlightBloomEffectConfig)
     light_wrap: LightWrapEffectConfig = Field(default_factory=LightWrapEffectConfig)
+    gun_outline: GunOutlineEffectConfig = Field(default_factory=GunOutlineEffectConfig)

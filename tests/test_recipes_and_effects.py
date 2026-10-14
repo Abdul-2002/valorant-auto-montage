@@ -118,3 +118,42 @@ def test_should_render_edges_in_a_single_hue() -> None:
     assert edge_px.size > 0
     assert np.all(edge_px[:, 2] >= edge_px[:, 0])
     assert lines[:, :60].max() == 0.0
+
+
+def _reference_effects(recipe: str, score: float = 0.9):
+    return map_effects(
+        inp=EffectMappingInput(score=score, arc_phase="climax"),
+        creative_config={"style_fx": "reference"},
+        brief=None,
+        recipe=recipe,
+    )
+
+
+def test_should_keep_default_kit_when_style_fx_is_not_reference() -> None:
+    punch = _effects("punch")
+    assert punch.rgb_split is None and punch.motion_blur is None
+    cine = _effects("cinematic")
+    assert cine.lens_distort is None and cine.highlight_bloom is None
+
+
+def test_should_add_reference_accents_on_fast_recipes_when_reference_style() -> None:
+    punch = _reference_effects("punch")
+    assert punch.rgb_split is not None and punch.rgb_split.enabled
+    assert punch.motion_blur is not None and punch.motion_blur.enabled
+    cine = _reference_effects("cinematic")
+    assert cine.lens_distort is not None and cine.lens_distort.enabled
+    assert cine.highlight_bloom is not None and cine.highlight_bloom.enabled
+
+
+def test_should_gate_bloom_on_score_for_slow_recipes_when_reference_style() -> None:
+    assert _reference_effects("slow", score=0.9).highlight_bloom is not None
+    assert _reference_effects("slow", score=0.4).highlight_bloom is None
+    assert _reference_effects("clean").rgb_split is None
+
+
+def test_should_favor_glow_hits_when_reference_style() -> None:
+    reference = assign_hit_styles(n=8, style_fx="reference")
+    default = assign_hit_styles(n=8)
+    assert reference.count("glow") > default.count("glow")
+    directed = assign_hit_styles(n=4, directed={1: "flash_blur"}, style_fx="reference")
+    assert directed[1] == "flash_blur"

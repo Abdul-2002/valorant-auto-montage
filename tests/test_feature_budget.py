@@ -20,3 +20,16 @@ def test_should_put_pip_on_some_slow_singles_and_ghosts_on_others() -> None:
 def test_should_skip_pip_on_multi_kill_clips() -> None:
     features = assign_features(recipes=["slow"] * 5, kill_counts=[3, 3, 3, 3, 3], scores=[0.9] * 5)
     assert all(not f.pip_style for f in features)
+
+
+def test_should_hard_disable_pip_for_reference_style() -> None:
+    n = 12
+    recipes = ["slow"] * n
+    features = assign_features(
+        recipes=recipes,
+        kill_counts=[1] * n,
+        scores=[0.4 + i * 0.04 for i in range(n)],
+        style_fx="reference",
+    )
+    assert all(not f.pip_style for f in features)
+    assert any(f.gun_candidate for f in features)

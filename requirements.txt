@@ -29,6 +29,9 @@ librosa>=0.10.2
 soundfile>=0.12.0
 pydub>=0.25.0
 scipy>=1.12.0
+# Music understanding (lyric / hook timing)
+faster-whisper==1.2.1
+demucs==4.0.1
 
 # Config
 pyyaml>=6.0

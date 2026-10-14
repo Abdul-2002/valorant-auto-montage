@@ -5,6 +5,14 @@ from pathlib import Path
 
 from src.io.audio_loader import resolve_ffmpeg_exe
 
+# h264_nvenc defaults to ~2 Mbps, which macroblocks 1080p60 motion; use constant quality.
+_NVENC_QUALITY_ARGS = ["-rc", "vbr", "-cq", "19", "-b:v", "0"]
+
+
+def video_quality_args(codec: str) -> list[str]:
+    """Extra ffmpeg rate-control args for ``codec`` (libx264 keeps its CRF default)."""
+    return list(_NVENC_QUALITY_ARGS) if codec == "h264_nvenc" else []
+
 
 def extract_audio_wav_mono(
     video_path: Path,
@@ -59,6 +67,7 @@ def crop_center_9x16_from_16x9(
         vf,
         "-c:v",
         codec,
+        *video_quality_args(codec),
         "-c:a",
         "aac",
         "-movflags",
