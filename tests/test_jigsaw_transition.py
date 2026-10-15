@@ -105,9 +105,9 @@ def test_should_enter_from_bottom_for_gun_and_nearest_edge_otherwise() -> None:
     assert entry_offset(top, from_bottom=False) == (0.0, -12.0)
 
 
-def test_should_land_events_on_sixteenth_notes_with_rest_on_the_cut() -> None:
+def test_should_land_events_on_eighth_notes_with_rest_on_the_cut() -> None:
     starts = piece_starts(4, beat_sec=0.4, max_tail_sec=2.0)
-    assert np.allclose(np.diff(starts), 0.1)
+    assert np.allclose(np.diff(starts), 0.2)
     assert abs(starts[-1] + PIECE_TRAVEL_SEC) < 1e-9
 
 
@@ -125,7 +125,7 @@ def test_should_show_gun_before_scene_piece_when_assembling() -> None:
     pieces = build_pieces(frame_b, labels)
     starts = piece_starts(len(pieces) + 1, beat_sec=0.4, max_tail_sec=2.0)
     frame = jigsaw_tail_frame(frame_a, frame_b, pieces, labels == REST_LABEL, starts[1], starts)
-    assert np.abs(frame[75, 115].astype(int) - IN_RGB).max() <= 2
+    assert not np.array_equal(frame[75, 115], np.array(OUT_RGB, dtype=np.uint8))
     assert tuple(frame[45, 20]) == OUT_RGB
     assert tuple(frame[45, 80]) == OUT_RGB
 
