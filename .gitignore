@@ -8,8 +8,18 @@ __pycache__/
 
 # runtime artifacts
 data/
-artifacts/
-outputs/
+artifacts/*
+!artifacts/run27/
+!artifacts/run27/**
+!artifacts/run26/
+artifacts/run26/*
+!artifacts/run26/elements/
+!artifacts/run26/elements/**
+!artifacts/run26/ghosts/
+!artifacts/run26/ghosts/**
+!artifacts/run26/guns/
+!artifacts/run26/guns/**
+/outputs/
 tmp/
 *.log
 
@@ -21,6 +31,11 @@ tmp/
 *.avi
 *.m4v
 *.DVR.mp4
+!/*.mp4
+!artifacts/run27/**/*.mp4
+reference/tutorials/*.info.json
+# 3.1 GB; GitHub LFS rejects files over 2 GB on Free and Pro
+/Valorant 2025.09.20 - 17.38.05.03.DVR.mp4
 
 # model weights (do not redistribute; download separately)
 *.pt
@@ -32,6 +47,8 @@ models/*
 *.wav
 *.flac
 *.ogg
+!artifacts/run27/**/*.mp3
+!artifacts/run27/**/*.wav
 codebase_dump.txt
 editing_sfx/
 
