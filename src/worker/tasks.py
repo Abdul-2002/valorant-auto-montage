@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,8 @@ from src.pipeline.kill_assets import attach_ghost_cutouts
 from src.pipeline.montage_assembler import render_montage
 from src.pipeline.music_edit import prepare_edited_track
 from src.worker.celery_app import celery_app
+
+log = logging.getLogger(__name__)
 
 
 def _task_dir(task_id: str) -> Path:
@@ -49,6 +53,9 @@ def detect_highlights_task(self, payload: dict[str, Any]) -> dict[str, Any]:
 
     out_path = tdir / "highlights.json"
     out_path.write_text(json.dumps({"highlights": [h.model_dump(mode="json") for h in highlights]}, indent=2), encoding="utf-8")
+
+    self.update_state(state="PROGRESS", meta={"phase": "summarizing", "progress": 0.9, "task_id": task_id})
+    _remember_sources(task_id, config, meta)
 
     return {"task_id": task_id, "phase": "review_ready", "progress": 1.0, "num_highlights": len(highlights)}
 
@@ -183,5 +190,38 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         song_title=music_src.stem if music_src is not None else "",
         task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "rendering", "progress": p}),
     )
+    _remember_outputs(detect_task_id, out_dir, meta)
 
     return {"detect_task_id": detect_task_id, "phase": "complete", "progress": 1.0, "outputs_dir": str(out_dir)}
+
+
+def _remember_sources(task_id: str, config: AppConfig, meta: dict[str, Any]) -> None:
+    """Index source VODs after detection. A library failure must not hide the highlights."""
+    try:
+        from src.library.catalog import index_detect_task
+
+        api_key = str(config.ai_director.gemini.api_key or os.environ.get("GEMINI_API_KEY", ""))
+        model = str(config.ai_director.gemini.model or "gemini-2.5-flash-lite")
+        index_detect_task(task_id, list(meta.get("videos") or []), api_key=api_key, model=model)
+    except Exception:
+        log.exception("source library index failed for task %s", task_id)
+
+
+def _remember_outputs(task_id: str, out_dir: Path, meta: dict[str, Any]) -> None:
+    try:
+        from src.library.catalog import record_rendered_outputs
+
+        music = meta.get("music")
+        song = Path(str(music)).stem if music else ""
+        record_rendered_outputs(task_id, out_dir, song)
+    except Exception:
+        log.exception("montage output index failed for task %s", task_id)
+
+
+@celery_app.task(bind=True)
+def upload_youtube_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+    from src.youtube.job import run_upload
+
+    upload_id = str(payload["upload_id"])
+    self.update_state(state="PROGRESS", meta={"phase": "youtube_upload", "upload_id": upload_id})
+    return run_upload(upload_id)

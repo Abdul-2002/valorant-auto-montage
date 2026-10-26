@@ -5,7 +5,9 @@ import os
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
+from src.app.routes.library import router as library_router
 from src.app.routes.montage import router as montage_router
+from src.app.routes.youtube import router as youtube_router
 
 
 def _patch_binary_formats(schema: object) -> None:
@@ -31,6 +33,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Bot")
     app.include_router(montage_router, prefix="/montage", tags=["montage"])
+    app.include_router(library_router, prefix="/library", tags=["library"])
+    app.include_router(youtube_router, prefix="/youtube", tags=["youtube"])
 
     def custom_openapi() -> dict:
         if app.openapi_schema:

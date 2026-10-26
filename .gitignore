@@ -2,12 +2,14 @@ __pycache__/
 *.pyc
 .venv/
 .env
+client_secret*.json
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
 # runtime artifacts
 data/
+library.sqlite3
 artifacts/*
 !artifacts/run27/
 !artifacts/run27/**
