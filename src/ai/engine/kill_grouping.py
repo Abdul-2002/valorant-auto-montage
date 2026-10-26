@@ -15,6 +15,15 @@ from src.pipeline.beat_layout import GAP_BEATS_MIN, NOMINAL_SPEED, ClipDemand
 
 MAX_KILL_GAP_SEC: float = 2.2
 MAX_KILLS_PER_CLIP: int = 5
+# A same-VOD run of 3+ kills, not a 2-kill pair. Pairs at 6s stay separate.
+ROUND_GAP_SEC: float = 8.0
+ROUND_SPAN_SEC: float = 28.0
+ROUND_MIN_KILLS: int = 3
+# Isolated kills at this score keep a 4–5s hold. Weaker ones are the kill only.
+HOLD_SCORE: float = 0.73
+HOLD_BARS: int = 3
+PUNCH_BARS: int = 1
+PUNCH_PRE_BEATS: int = 2
 
 
 @dataclass(frozen=True)
@@ -47,9 +56,16 @@ class KillGroup:
 
     def demand(self) -> ClipDemand:
         secs = self.kill_secs
+        gaps = tuple(b - a for a, b in zip(secs, secs[1:]))
+        if len(self.events) != 1:
+            return ClipDemand(src_kill_gaps=gaps, src_pre_available=secs[0])
+        if self.score >= HOLD_SCORE:
+            return ClipDemand(src_kill_gaps=gaps, src_pre_available=secs[0], fixed_bars=HOLD_BARS)
         return ClipDemand(
-            src_kill_gaps=tuple(b - a for a, b in zip(secs, secs[1:])),
+            src_kill_gaps=gaps,
             src_pre_available=secs[0],
+            fixed_bars=PUNCH_BARS,
+            pre_beats=PUNCH_PRE_BEATS,
         )
 
 
@@ -77,6 +93,55 @@ def group_kills(
             groups.append(KillGroup(tuple(current)))
     groups.sort(key=lambda g: (g.kill_secs[0], g.video_index))
     return groups
+
+
+def _emit_chain(chain: Sequence[KillGroup]) -> list[KillGroup]:
+    kills = sum(len(g.events) for g in chain)
+    if len(chain) < 2 or kills < ROUND_MIN_KILLS:
+        return list(chain)
+    return [KillGroup(tuple(e for g in chain for e in g.events))]
+
+
+def _chain_video(items: Sequence[KillGroup]) -> list[KillGroup]:
+    """Join consecutive groups while each step stays inside the round limits."""
+    out: list[KillGroup] = []
+    chain: list[KillGroup] = []
+    for group in items:
+        if chain:
+            gap = group.kill_secs[0] - chain[-1].kill_secs[-1]
+            span = group.kill_secs[-1] - chain[0].kill_secs[0]
+            if gap > ROUND_GAP_SEC or span > ROUND_SPAN_SEC:
+                out.extend(_emit_chain(chain))
+                chain = []
+        chain.append(group)
+    if chain:
+        out.extend(_emit_chain(chain))
+    return out
+
+
+def join_round_chains(groups: Sequence[KillGroup]) -> list[KillGroup]:
+    """One clip for a same-VOD run of 3+ kills. A 2-kill pair stays two clips."""
+    by_video: dict[int, list[KillGroup]] = {}
+    for group in groups:
+        by_video.setdefault(group.video_index, []).append(group)
+    merged: list[KillGroup] = []
+    for items in by_video.values():
+        items.sort(key=lambda g: g.kill_secs[0])
+        merged.extend(_chain_video(items))
+    merged.sort(key=lambda g: (g.kill_secs[0], g.video_index))
+    return merged
+
+
+def with_locked_finale(groups: Sequence[KillGroup]) -> list[KillGroup]:
+    """Keep the biggest spray burst as the ending, then join round chains in the body.
+
+    Chaining first would make the long run the finale and move the spray ending.
+    """
+    if len(groups) < 2:
+        return join_round_chains(groups)
+    finale = max(groups, key=_group_value)
+    body = join_round_chains([g for g in groups if g is not finale])
+    return body + [finale]
 
 
 def _group_value(group: KillGroup) -> tuple[int, float]:

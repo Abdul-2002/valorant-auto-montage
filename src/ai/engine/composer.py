@@ -11,7 +11,7 @@ from src.ai.engine.clip_planner import ClipDirection, build_script_clip
 from src.ai.engine.clip_selector import select_event_indices
 from src.ai.engine.effect_mapper import VALID_RECIPES, assign_hit_styles, assign_recipes
 from src.ai.engine.feature_budget import assign_features
-from src.ai.engine.kill_grouping import KillGroup, fit_groups_to_duration, group_kills, move_finale_last
+from src.ai.engine.kill_grouping import HOLD_SCORE, KillGroup, fit_groups_to_duration, group_kills, with_locked_finale
 from src.ai.engine.transition_planner import plan_transitions
 from src.ai.schema import CreativeBrief, MontageScript, ScriptClip
 from src.config.models import VelocityEffectConfig
@@ -88,7 +88,7 @@ def select_kill_groups(
         diversity_window_sec=0.0,
         near_dup_window_sec=NEAR_DUP_WINDOW_SEC,
     )
-    groups = group_kills([enriched[i] for i in selection.event_indices])
+    groups = with_locked_finale(group_kills([enriched[i] for i in selection.event_indices]))
     interval = beat_interval(beat_map, target_sec)
     if _bar_mode(beat_map):
         bar_sec = BEATS_PER_BAR * interval
@@ -100,7 +100,7 @@ def select_kill_groups(
         )
     else:
         groups = fit_groups_to_duration(groups, target_sec=target_sec, beat_interval=interval)
-    return move_finale_last(groups)
+    return groups
 
 
 def _plan(inp: ComposeInputs, groups: list[KillGroup]) -> list[ClipBeatPlan]:
@@ -142,6 +142,9 @@ def _with_transitions(clips: list[ScriptClip], inp: ComposeInputs) -> list[Scrip
         clip_sources=[(c.video_index, float(c.kill_timestamp_sec)) for c in clips],
         scene_jigsaw=str(inp.creative_config_resolved.get("style_fx", "")) == "reference",
         beat_interval_sec=beat_interval(inp.beat_map),
+        jigsaw_ranks=[
+            2 if len(c.kill_timestamps_sec) >= 2 else (1 if float(c.score) >= HOLD_SCORE else 0) for c in clips
+        ],
     ).transitions_to_next
     return [
         c.model_copy(update={"transition_to_next": transitions[i]}) if i < len(transitions) else c
