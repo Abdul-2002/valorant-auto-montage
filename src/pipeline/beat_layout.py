@@ -39,6 +39,8 @@ class ClipDemand:
 
     src_kill_gaps: tuple[float, ...] = ()  # source seconds between consecutive kills
     src_pre_available: float = 10.0  # source seconds available before the first kill
+    fixed_bars: int | None = None  # exact length; leftover bars must not stretch it
+    pre_beats: int | None = None  # beats from the cut to the kill when set
 
 
 @dataclass(frozen=True)

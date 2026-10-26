@@ -3,8 +3,8 @@
 The incoming clip's first frame is split into scene elements: its gun
 (``WEAPON_LABEL``), SAM scene segments (labels 2+) and the rest of the frame
 (``REST_LABEL``). Over the outgoing clip's last beat each element slides in
-from its nearest frame edge (the gun comes up from below) on successive
-eighth notes with motion smear, and the rest lands on the cut, so the incoming clip
+from its nearest frame edge (the gun comes up from below), two-thirds of a
+beat apart, with motion smear, and the rest lands on the cut, so the incoming clip
 continues from the assembled frame. Duration-preserving: only the outgoing
 tail is restyled. Refs: https://www.youtube.com/watch?v=gk_z0ZZxk94
 """
@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 
 REST_LABEL = 0
 WEAPON_LABEL = 1
-PIECE_TRAVEL_SEC = 0.32
-# Landing gap as a fraction of a beat. 1/3 still read as too fast on the second preview.
-_STAGGER_BEAT_FRAC = 0.5
+PIECE_TRAVEL_SEC = 0.42
+# Landing gap as a fraction of a beat. Half a beat still read fast on run 27.
+_STAGGER_BEAT_FRAC = 2.0 / 3.0
 FALLBACK_BEAT_SEC = 0.43
 # Fixed layout (fractions of w/h) when no scene segmentation is available.
 _GUN_BOX = (0.50, 0.58, 0.86)
@@ -139,7 +139,7 @@ def _blend_rest(out: np.ndarray, frame_b: np.ndarray, rest_mask: np.ndarray, u: 
 
 
 def piece_starts(n_events: int, beat_sec: float, max_tail_sec: float) -> list[float]:
-    """Start time of each event relative to the cut; event k lands on the k-th eighth note."""
+    """Start time of each event relative to the cut; landings are two-thirds of a beat apart."""
     travel = min(PIECE_TRAVEL_SEC, max(0.0, max_tail_sec))
     room = max(0.0, max_tail_sec - travel) / max(1, n_events - 1)
     stagger = min(float(beat_sec) * _STAGGER_BEAT_FRAC, room)

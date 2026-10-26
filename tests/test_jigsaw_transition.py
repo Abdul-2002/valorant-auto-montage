@@ -105,9 +105,9 @@ def test_should_enter_from_bottom_for_gun_and_nearest_edge_otherwise() -> None:
     assert entry_offset(top, from_bottom=False) == (0.0, -12.0)
 
 
-def test_should_land_events_on_eighth_notes_with_rest_on_the_cut() -> None:
+def test_should_land_events_two_thirds_of_a_beat_apart_with_rest_on_the_cut() -> None:
     starts = piece_starts(4, beat_sec=0.4, max_tail_sec=2.0)
-    assert np.allclose(np.diff(starts), 0.2)
+    assert np.allclose(np.diff(starts), 0.4 * (2.0 / 3.0))
     assert abs(starts[-1] + PIECE_TRAVEL_SEC) < 1e-9
 
 
@@ -152,6 +152,13 @@ def test_should_skip_scene_jigsaw_when_next_kill_is_same_round() -> None:
     assert scene_jigsaw_slots(kinds, sources) == {1}
 
 
+def test_should_bridge_calm_cuts_instead_of_a_raw_hard_cut() -> None:
+    plan = plan_transitions(num_clips=5, beat_map=None, flash_frequency=0.0, beat_interval_sec=0.4)
+    kinds = [t.type for t in plan.transitions_to_next[:-1]]
+    assert "hard_cut" not in kinds
+    assert kinds[:3] == ["whip_pan", "push", "whip_pan"]
+
+
 def test_should_size_jigsaws_to_one_beat_and_add_scene_jigsaws_only_in_reference_style() -> None:
     sources = [(k, 0.0) for k in range(6)]
     base = plan_transitions(num_clips=6, beat_map=None, flash_frequency=0.0, clip_sources=sources, beat_interval_sec=0.4)
@@ -168,7 +175,39 @@ def test_should_size_jigsaws_to_one_beat_and_add_scene_jigsaws_only_in_reference
 def test_should_never_stack_a_rotation_jigsaw_before_the_finale_jigsaw() -> None:
     chorus = SimpleNamespace(sections=[SimpleNamespace(start_sec=0.0, end_sec=100.0, section_type="chorus")])
     plan = plan_transitions(num_clips=3, beat_map=chorus, flash_frequency=0.0, beat_interval_sec=0.4)
-    assert [t.type for t in plan.transitions_to_next[:-1]] == ["pop_slam", "jigsaw"]
+    kinds = [t.type for t in plan.transitions_to_next[:-1]]
+    assert kinds[-1] == "jigsaw"
+    assert kinds[-2] != "jigsaw"
+
+
+def test_should_jigsaw_holds_and_multis_only_and_cap_scene_jigsaws_at_two() -> None:
+    sources = [(i, 0.0) for i in range(6)]
+    ranks = [0, 1, 0, 2, 0, 2]
+    plan = plan_transitions(
+        num_clips=6,
+        beat_map=None,
+        flash_frequency=0.0,
+        clip_sources=sources,
+        scene_jigsaw=True,
+        beat_interval_sec=0.4,
+        jigsaw_ranks=ranks,
+    )
+    kinds = [t.type for t in plan.transitions_to_next[:-1]]
+    assert kinds[1] != "jigsaw"
+    assert kinds[3] != "jigsaw"
+    assert {i for i, k in enumerate(kinds) if k == "jigsaw"} == {0, 2, 4}
+    before_finale = plan_transitions(
+        num_clips=4,
+        beat_map=None,
+        flash_frequency=0.0,
+        clip_sources=[(i, 0.0) for i in range(4)],
+        scene_jigsaw=True,
+        beat_interval_sec=0.4,
+        jigsaw_ranks=[0, 0, 2, 2],
+    )
+    into = [t.type for t in before_finale.transitions_to_next[:-1]]
+    assert into[1] == "jigsaw"
+    assert into[2] == "jigsaw"
 
 
 def test_should_promote_gun_shaped_segment_in_weapon_box_when_prompt_fails() -> None:
