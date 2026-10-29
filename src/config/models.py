@@ -12,6 +12,7 @@ from src.config.effect_models import (  # noqa: F401  (re-exported for existing 
     EffectsConfig,
     FreezeFrameEffectConfig,
     GhostFreezeEffectConfig,
+    GlitterEffectConfig,
     GunOutlineEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
@@ -64,6 +65,11 @@ class OverlaysConfig(BaseModel):
     multi_kill_callouts: bool = True
     # Timed lyric/hook lines from the music-understanding layer (P2).
     lyrics_overlays: bool = True
+    # Engagement captions: mid-montage pop-ins + end cards + closing thumbnail title.
+    engagement_captions: bool = False
+    engagement_mid_popins: bool = True
+    engagement_outro: bool = True
+    engagement_hold_sec: float = Field(gt=0.8, le=5.0, default=2.2)
     # TTF/OTF font; empty tries Impact / Arial Bold / DejaVu Sans Bold.
     font_path: str = ""
 
@@ -84,8 +90,12 @@ class TransitionsConfig(BaseModel):
 
 class AudioMixingConfig(BaseModel):
     enabled: bool = True
-    music_volume_db: float = Field(ge=-60.0, le=24.0, default=0.0)
+    music_volume_db: float = Field(ge=-60.0, le=24.0, default=-6.0)
     game_sfx_volume_db: float = Field(ge=-60.0, le=24.0, default=-8.0)
+    kill_music_duck_db: float = Field(ge=-60.0, le=0.0, default=-8.0)
+    kill_game_boost_db: float = Field(ge=0.0, le=24.0, default=6.0)
+    kill_pre_ms: float = Field(ge=0.0, le=500.0, default=40.0)
+    kill_hold_ms: float = Field(ge=0.0, le=1000.0, default=260.0)
 
 
 class BassBoostConfig(BaseModel):
@@ -93,7 +103,7 @@ class BassBoostConfig(BaseModel):
     # v1: default to always-on so the effect is not a no-op.
     # A future iteration can wire BeatMap/RMS into a real "drops only" mode.
     on_drops_only: bool = False
-    boost_db: float = Field(ge=0.0, le=24.0, default=4.0)
+    boost_db: float = Field(ge=0.0, le=24.0, default=0.0)
     kill_sfx_overlay: bool = True
     sfx_path: Optional[str] = "assets/sfx/bass_hit.mp3"
     sfx_gain_db: float = Field(ge=-60.0, le=24.0, default=-6.0)

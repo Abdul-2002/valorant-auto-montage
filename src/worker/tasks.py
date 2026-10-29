@@ -7,18 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.app.dependencies import get_storage_dir
-from src.config.loader import _deep_merge
 from src.config.models import AppConfig
-from src.ai.director import generate_montage_script
-from src.ai.schema import CreativeBrief
-from src.ai.enrichment import enrich_events
-from src.ai.providers import safe_generate_brief
-from src.ai.providers.base import BriefContext
-from src.pipeline.highlight_detector import detect_highlights
-from src.pipeline.jigsaw_assets import attach_jigsaw_pieces
-from src.pipeline.kill_assets import attach_ghost_cutouts
-from src.pipeline.montage_assembler import render_montage
-from src.pipeline.music_edit import prepare_edited_track
 from src.worker.celery_app import celery_app
 
 log = logging.getLogger(__name__)
@@ -44,6 +33,8 @@ def detect_highlights_task(self, payload: dict[str, Any]) -> dict[str, Any]:
     config = AppConfig.model_validate(payload.get("config", {}))
     (tdir / "detect_config.json").write_text(config.model_dump_json(indent=2), encoding="utf-8")
     self.update_state(state="PROGRESS", meta={"phase": "detecting", "progress": 0.15})
+
+    from src.pipeline.highlight_detector import detect_highlights
 
     highlights = detect_highlights(
         video_paths=[Path(p) for p in meta["videos"]],
@@ -83,11 +74,23 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
     confirmed = json.loads(confirmed_path.read_text(encoding="utf-8"))
     overrides = confirmed.get("overrides") or {}
     if overrides:
+        from src.config.loader import _deep_merge
+
         merged = config.model_dump(mode="json")
         merged = _deep_merge(merged, overrides)
         config = AppConfig.model_validate(merged)
 
     self.update_state(state="PROGRESS", meta={"phase": "rendering", "progress": 0.05, "task_id": detect_task_id})
+
+    from src.ai.director import generate_montage_script
+    from src.ai.enrichment import enrich_events
+    from src.ai.providers import safe_generate_brief
+    from src.ai.providers.base import BriefContext
+    from src.ai.schema import CreativeBrief
+    from src.pipeline.jigsaw_assets import attach_jigsaw_pieces
+    from src.pipeline.kill_assets import attach_ghost_cutouts
+    from src.pipeline.montage_assembler import render_montage
+    from src.pipeline.music_edit import prepare_edited_track
 
     out_dir = tdir / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)

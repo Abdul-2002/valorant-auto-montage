@@ -11,6 +11,7 @@ from src.config.models import (
     EdgeGlowEffectConfig,
     FreezeFrameEffectConfig,
     GhostFreezeEffectConfig,
+    GlitterEffectConfig,
     GunOutlineEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
@@ -143,6 +144,7 @@ class ScriptClipEffects(BaseModel):
     highlight_bloom: Optional[HighlightBloomEffectConfig] = None
     light_wrap: Optional[LightWrapEffectConfig] = None
     gun_outline: Optional[GunOutlineEffectConfig] = None
+    glitter: Optional[GlitterEffectConfig] = None
 
 
 class ScriptClip(BaseModel):

@@ -1,0 +1,322 @@
+output:
+  # Multi-VOD Zishu-length target (~1–1.5 min). Needs enough kills across sources.
+  target_duration_sec: 90
+  formats: ["16:9", "9:16"]
+  resolution: "1920x1080"
+  fps: 60
+  codec: "libx264"
+
+effects:
+  pipeline_order:
+    - velocity
+    - ghost_freeze
+    - freeze_frame
+    - gun_outline
+    - camera
+    - zoom
+    - shake
+    - motion_blur
+    - scope_vignette
+    - death_pip
+    - highlight_bloom
+    - light_wrap
+    - edge_glow
+    - kill_hit
+    - lens_distort
+    - rgb_split
+    - letterbox
+    - pip_inset
+    - color_grading
+
+  camera:
+    enabled: false
+    kill_shake_px: 8
+    kill_shake_rot_deg: 0.6
+    kill_shake_sec: 0.28
+    beat_pulse: 0.03
+    beat_pulse_sec: 0.18
+    push_in: 0.0
+    crash_zoom: 0.0
+    crash_zoom_sec: 0.3
+    transition_sec: 0.14
+
+  ghost_freeze:
+    enabled: false
+    lead_sec: 0.5
+    max_alpha: 0.55
+
+  pip_inset:
+    enabled: false
+    style: "freeze_inset"
+    delay_sec: 0.08
+    hold_sec: 1.0
+    zoom: 2.2
+    replay_window_sec: 0.6
+    replay_speed: 0.5
+    width_px: 520
+
+  velocity:
+    enabled: true
+    # Post-kill slow-mo (Zishu style); recipes override duration per clip.
+    kill_slowmo_factor: 0.4
+    kill_slowmo_duration_sec: 0.9
+    # No frame interpolation: keep >= 30 distinct source frames/s (60fps VOD caps at 0.5x).
+    slowmo_min_unique_fps: 30
+    approach_speed: 1.15
+    exit_speed: 1.35
+    transition_speedup_factor: 2.0
+    easing: "ease_in_out_cubic"
+
+  zoom:
+    enabled: false
+    max_zoom: 1.32
+    duration_sec: 0.45
+    crash_in_frac: 0.35
+    easing: "ease_out_quad"
+    center: "screen_center"
+
+  shake:
+    enabled: false
+    amplitude_px: 6
+    decay_rate: 0.85
+    duration_frames: 8
+
+  color_grading:
+    enabled: true
+    saturation: 1.3
+    contrast: 1.1
+    brightness: 0.02
+    lut_file: null
+
+  # Enabled per clip only when the kill was scoped (Operator/Marshal/Outlaw).
+  scope_vignette:
+    enabled: false
+    pre_sec: 0.35
+    release_sec: 0.12
+    inner_radius: 0.92
+    darkness: 0.92
+    feather: 0.05
+
+  kill_hit:
+    enabled: true
+    style: "flash_blur"
+    decay_sec: 0.3
+    flash_strength: 0.5
+    blur_px: 16
+    glow_threshold: 0.55
+    glow_blur_px: 31
+    glow_intensity: 1.2
+    shake_px: 12
+    minor_scale: 0.6
+
+  death_pip:
+    enabled: false
+    duration_sec: 0.95
+    scale: 2.6
+    size_frac: 0.36
+    margin_frac: 0.025
+    border_px: 5
+    desaturate: 0.45
+
+  # Zishu find-edges + tritone + glow; the composer enables it on cinematic kills.
+  edge_glow:
+    enabled: false
+    hold_sec: 0.1
+    fade_sec: 0.5
+    mid_rgb: [40, 140, 255]
+    highlight_rgb: [210, 240, 255]
+    glow_threshold: 0.3
+    glow_blur_px: 51
+    glow_intensity: 1.0
+
+  freeze_frame:
+    enabled: false
+    duration_sec: 0.08
+
+  motion_blur:
+    enabled: false
+    duration_sec: 0.25
+    amount_px: 28
+
+  letterbox:
+    enabled: false
+    bar_frac: 0.08
+    duration_sec: 1.2
+
+  lens_distort:
+    enabled: false
+    duration_sec: 0.35
+    strength: 0.18
+
+  rgb_split:
+    enabled: false
+    duration_sec: 0.18
+    offset_px: 4
+
+  highlight_bloom:
+    enabled: false
+    duration_sec: 0.55
+    luma_threshold: 0.62
+    blur_px: 18
+    intensity: 0.85
+    weapon_bias: 0.35
+
+  light_wrap:
+    enabled: false
+    duration_sec: 0.4
+    radius: 0.55
+    intensity: 0.28
+
+overlays:
+  # Title-only mode: faux-3D intro title + light leaks/flares (reference look).
+  # Lyrics/callouts stay off — they were hurting the cut more than helping.
+  # Set title_text to your gamer tag; empty string renders no title.
+  enabled: true
+  light_leaks: true
+  light_leak_strength: 0.35
+  flare_streaks: true
+  flare_strength: 0.8
+  title_text: ""
+  title_sec: 2.4
+  song_credit: false
+  per_kill_callouts: false
+  multi_kill_callouts: true
+  lyrics_overlays: false
+  # Mid pop-ins (LIKE/SUBSCRIBE) + end cards (THANKS/LIKE/SUBSCRIBE/COMMENT) + THUMBNAIL outro.
+  engagement_captions: true
+  engagement_mid_popins: true
+  engagement_outro: true
+  engagement_hold_sec: 2.2
+
+transitions:
+  enabled: true
+  default_type: "hard_cut"
+  beat_drop_type: "flash_white"
+  chorus_type: "whip_pan"
+  verse_type: "hard_cut"
+  flash_duration_sec: 0.05
+  xfade_duration_sec: 0.2
+  whip_duration_sec: 0.14
+  push_duration_sec: 0.12
+  whoosh_sfx_path: "assets/sfx/whoosh.wav"
+  whoosh_gain_db: -10
+
+audio:
+  mixing:
+    enabled: true
+    music_volume_db: 0
+    game_sfx_volume_db: -8
+
+  bass_boost:
+    enabled: true
+    # v1: keep bass boost active (drops-only is not implemented yet)
+    on_drops_only: false
+    boost_db: 4
+    kill_sfx_overlay: true
+    sfx_path: "assets/sfx/bass_hit.mp3"
+    sfx_gain_db: -6
+
+detection:
+  # Primary kill detector: local auto_gaming YOLO. Gemini is director-only (effects).
+  strategy: "yolo_legacy"
+  active_detectors: ["auto_gaming_yolo"]
+
+  gemini_video:
+    enabled: false
+    model: "gemini-2.5-flash"
+    min_excitement: 0.3
+
+  gemini_kill_verify:
+    enabled: false
+    model: "gemini-2.5-flash-lite"
+    clip_pre_sec: 1.0
+    clip_post_sec: 1.2
+    min_confidence: 0.55
+    generate_timeout_sec: 90
+    poll_timeout_sec: 120
+
+  hud_ocr:
+    enabled: false
+    search_window_sec: 1.6
+    triggers:
+      - text: "HEADSHOT"
+        region: [0.42, 0.87, 0.58, 0.95]
+      - text: "ACE"
+        region: [0.40, 0.15, 0.60, 0.22]
+      - text: "CLUTCH"
+        region: [0.38, 0.13, 0.62, 0.22]
+
+  valorant_kill_feed:
+    region: [0.65, 0.0, 1.0, 0.15]
+    confidence_threshold: 0.75
+    cooldown_sec: 0.5
+    sample_fps: 3
+
+  valorant_yolo:
+    enabled: false
+    model_path: "models/valorant_killfeed_yolo11n.pt"
+    confidence_threshold: 0.5
+    region: [0.65, 0.0, 1.0, 0.15]
+
+  auto_gaming_yolo:
+    enabled: true
+    model_path: "models/auto_gaming_valorant.pt"
+    confidence_threshold: 0.5
+    region: [0.0, 0.0, 1.0, 1.0]
+    sample_fps: 3
+    presence_conf: 0.3
+    reemit_guard_sec: 1.5
+    # Collapse kill-1/kill-2 flicker on the same frag.
+    kill_dedupe_gap_sec: 1.0
+    # Anchor beats on the elimination (killfeed row appears ~0.1s after the body
+    # drop). Larger values re-anchor onto the start of the spray, making zooms
+    # and slowmo fire visibly before the kill.
+    killfeed_latency_sec: 0.1
+    refine_full_fps: true
+
+  audio_peaks:
+    rms_threshold_percentile: 90
+    min_peak_distance_sec: 0.3
+    use_hpss: true
+
+  scoring:
+    visual_weight: 0.8
+    audio_weight: 0.2
+    dedup_window_sec: 1.0
+
+  sam_model_path: "models/sam2.1_t.pt"
+
+ai_director:
+  enabled: true
+  # Gemini only as creative director (effect recipes / pacing), not kill detection.
+  provider: "gemini"
+  style_preset: "rafialihsan"
+
+  creative_config:
+    pacing: 0.9
+    effect_intensity: 0.9
+    slowmo_bias: 0.7
+    flash_frequency: 0.7
+    shake_intensity: 0.85
+    zoom_aggression: 0.8
+    color_warmth: 0.6
+    beat_sync_strictness: 0.9
+    variety: 0.8
+    arc_enabled: true
+
+  gemini:
+    api_key: ""
+    model: "gemini-2.5-flash-lite"
+    temperature: 0.7
+
+  openai_compatible:
+    base_url: "http://localhost:11434/v1"
+    api_key: ""
+    model: "qwen2.5:3b"
+    temperature: 0.7
+
+  local:
+    model_path: "models/qwen2.5-3b-instruct-q4_k_m.gguf"
+    n_gpu_layers: 0
+    n_ctx: 4096
+    temperature: 0.7

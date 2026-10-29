@@ -7,6 +7,7 @@ from typing import Any, Callable
 import numpy as np
 from moviepy import AudioFileClip, VideoFileClip, concatenate_videoclips
 from pydub import AudioSegment
+from pydub.effects import normalize
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 _RENDER_MAX_SPEED: float = 2.0
 _RENDER_MIN_SPEED: float = 0.3
 _RENDER_MIN_SLOT_SEC: float = 0.5
+# Final mix peak sits 1 dB under full scale so the AAC encode does not clip.
+_MIX_PEAK_HEADROOM_DB: float = 1.0
 
 from src.ai.schema import MontageScript
 from src.config.models import AppConfig
@@ -22,6 +25,7 @@ from src.effects.registry import get_audio_effect, get_clip_effect
 from src.io.audio_loader import load_audio_segment
 from src.io.ffmpeg import crop_center_9x16_from_16x9, video_quality_args
 from src.pipeline.clip_sequencer import SelectedClip, select_clips
+from src.pipeline.decoder_pool import DecoderPool
 from src.pipeline.types import DetectedEvent
 
 
@@ -38,8 +42,9 @@ def _close_quietly(obj: Any) -> None:
         pass
 
 
-def _make_clip(video_path: Path, clip: SelectedClip) -> VideoFileClip:
+def _make_clip(video_path: Path, clip: SelectedClip, pool: DecoderPool) -> VideoFileClip:
     base = VideoFileClip(str(video_path))
+    pool.track(base.reader)
     # MoviePy v2 renamed `subclip` -> `subclipped`.
     if hasattr(base, "subclip"):
         return base.subclip(clip.start_sec, clip.end_sec)  # type: ignore[attr-defined]
@@ -286,11 +291,12 @@ def render_montage(
     if not selected:
         return
 
+    decoders = DecoderPool()
     try:
         clips: list[Any] = []
         for i, sel in enumerate(selected):
             vpath = video_paths[sel.video_index]
-            vclip = _make_clip(vpath, sel)
+            vclip = _make_clip(vpath, sel, decoders)
             opened.append(vclip)
             vclip = _resized(vclip, w=w, h=h)
             clip_duration = float(getattr(vclip, "duration", None) or (sel.end_sec - sel.start_sec))
@@ -330,7 +336,7 @@ def render_montage(
                             "assembler: output slot %.3fs < %.3fs for clip %d; using natural speed.",
                             raw_dur, _RENDER_MIN_SLOT_SEC, i,
                         )
-                        vclip = _make_clip(video_paths[sel.video_index], sel)
+                        vclip = _make_clip(video_paths[sel.video_index], sel, decoders)
                         vclip = _resized(vclip, w=w, h=h)
                         target_dur = clip_duration
                     else:
@@ -581,6 +587,7 @@ def render_montage(
                         delta_dur,
                     )
             mixed = audio_pack["mixed"][: int(max(0.0, assembled_dur) * 1000)]
+            mixed = normalize(mixed, headroom=_MIX_PEAK_HEADROOM_DB)
             # Cold open: music_edit starts on the first downbeat at full energy.
             # Fade in so the montage does not slam the listener mid-attack.
             mixed = mixed.fade_in(800)

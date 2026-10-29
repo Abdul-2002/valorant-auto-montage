@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
-
-import cv2
-import numpy as np
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.ai.schema import MontageScript
 from src.config.models import OverlaysConfig
-from src.effects.envelopes import decay_envelope
-from src.effects.text_sprites import composite, text_sprite, text_sprite_3d
-from src.pipeline.beat_analyzer import BeatMap
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from src.pipeline.beat_analyzer import BeatMap
 
 _LEAK_SEC = 1.1
 _FLARE_SEC = 0.28
@@ -24,7 +23,9 @@ _LEAK_COLORS = ((255, 140, 60), (255, 70, 150), (70, 190, 255))
 
 # Burst size → Valorant-style callout (clip-local multi-kill).
 BURST_TEXT = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL", 5: "ACE"}
-TextKind = Literal["title", "credit", "kill", "burst", "lyric"]
+_MID_ENGAGE = ("LIKE", "SUBSCRIBE", "COMMENT")
+_END_ENGAGE = ("THANKS FOR WATCHING", "LIKE", "SUBSCRIBE", "COMMENT")
+TextKind = Literal["title", "credit", "kill", "burst", "lyric", "engage"]
 
 _STYLE: dict[str, tuple[tuple[int, int, int], tuple[int, int, int], int, float]] = {
     # color, glow, size, y_frac
@@ -33,6 +34,7 @@ _STYLE: dict[str, tuple[tuple[int, int, int], tuple[int, int, int], int, float]]
     "kill": ((255, 255, 255), (255, 60, 80), 64, 0.26),
     "burst": ((255, 255, 255), (255, 190, 40), 82, 0.24),
     "lyric": ((255, 255, 255), (120, 220, 255), 56, 0.72),
+    "engage": ((255, 255, 255), (255, 90, 160), 60, 0.78),
 }
 
 
@@ -106,6 +108,18 @@ def build_overlay_plan(
                 continue
             texts.append(TextEvent(at, str(line).strip().upper(), "lyric", _LYRIC_SEC))
 
+    if cfg.engagement_captions:
+        texts.extend(
+            _engagement_events(
+                script=script,
+                phase_sec=phase_sec,
+                kill_times=kills,
+                hold=float(cfg.engagement_hold_sec),
+                mid=bool(cfg.engagement_mid_popins),
+                outro=bool(cfg.engagement_outro),
+            )
+        )
+
     return OverlayPlan(
         kill_times=tuple(kills),
         leak_times=tuple(sorted(set(round(x, 3) for x in leaks))),
@@ -113,7 +127,71 @@ def build_overlay_plan(
     )
 
 
+def _clip_end(clip: Any, phase_sec: float) -> float:
+    if clip.output_end_sec is not None:
+        return float(clip.output_end_sec) - phase_sec
+    start = float(clip.output_start_sec or 0.0) - phase_sec
+    return start + max(0.1, float(clip.end_sec) - float(clip.start_sec))
+
+
+def _montage_end(script: MontageScript, phase_sec: float) -> float:
+    ends = [_clip_end(c, phase_sec) for c in script.clips]
+    return max(ends) if ends else 0.0
+
+
+def _near_kill(at: float, kill_times: list[float], pad: float = 1.2) -> bool:
+    return any(abs(at - k) < pad for k in kill_times)
+
+
+def _engagement_events(
+    *,
+    script: MontageScript,
+    phase_sec: float,
+    kill_times: list[float],
+    hold: float,
+    mid: bool,
+    outro: bool,
+) -> list[TextEvent]:
+    """Mid pop-ins on calm clip heads, end cards in the last seconds, optional thumbnail title."""
+    out: list[TextEvent] = []
+    end = _montage_end(script, phase_sec)
+    if end <= 0.5:
+        return out
+
+    if mid:
+        slots = [
+            float(c.output_start_sec or 0.0) - phase_sec + 0.35
+            for c in script.clips[1:]
+            if (c.output_start_sec or 0.0) > 1.0
+        ]
+        used = 0
+        for at in slots:
+            if used >= len(_MID_ENGAGE):
+                break
+            if at < 4.0 or at > end - (hold * (len(_END_ENGAGE) + 1.5)):
+                continue
+            if _near_kill(at, kill_times):
+                continue
+            out.append(TextEvent(at, _MID_ENGAGE[used], "engage", hold))
+            used += 1
+
+    cards = list(_END_ENGAGE)
+    if outro:
+        cards.append("THUMBNAIL")
+    need = hold * len(cards)
+    start = max(0.5, end - need)
+    # If the montage is short, squeeze holds so the sequence still fits.
+    step = hold if need <= end else max(0.9, end / max(1, len(cards)))
+    for i, label in enumerate(cards):
+        kind: TextKind = "title" if label == "THUMBNAIL" else "engage"
+        out.append(TextEvent(start + i * step, label, kind, min(hold, step)))
+    return out
+
+
 def _light_leak(frame: np.ndarray, u: float, seed: int, strength: float) -> np.ndarray:
+    import cv2
+    import numpy as np
+
     lw, lh = _LOW_RES
     yy, xx = np.mgrid[0:lh, 0:lw].astype(np.float32)
     cx = (-0.2 + 1.4 * u) * lw
@@ -127,6 +205,9 @@ def _light_leak(frame: np.ndarray, u: float, seed: int, strength: float) -> np.n
 
 
 def _flare_streak(frame: np.ndarray, e: float, strength: float) -> np.ndarray:
+    import cv2
+    import numpy as np
+
     h, w = frame.shape[:2]
     small = cv2.resize(frame, (w // 4, h // 4), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
     luma = small @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
@@ -150,6 +231,8 @@ def _event_alpha(rel: float, hold: float) -> tuple[float, float]:
 
 
 def _draw_texts(frame: np.ndarray, t: float, plan: OverlayPlan, font_path: str) -> np.ndarray:
+    from src.effects.text_sprites import composite, text_sprite, text_sprite_3d
+
     h, w = frame.shape[:2]
     for ev in plan.texts:
         alpha, scale = _event_alpha(t - ev.at_sec, ev.hold_sec)
@@ -178,6 +261,8 @@ def _draw_texts(frame: np.ndarray, t: float, plan: OverlayPlan, font_path: str) 
 def apply_montage_overlays(clip: Any, plan: OverlayPlan, cfg: OverlaysConfig) -> Any:
     if not cfg.enabled:
         return clip
+
+    from src.effects.envelopes import decay_envelope
 
     def transform(get_frame, t: float):
         frame = get_frame(t)

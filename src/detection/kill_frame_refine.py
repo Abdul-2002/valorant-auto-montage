@@ -280,7 +280,7 @@ def snap_kills_to_banner(highlights: list[DetectedEvent], video_paths: list[Path
     out = list(highlights)
     by_video: dict[int, list[int]] = {}
     for i, ev in enumerate(out):
-        if ev.event_type == "kill" and 0 <= ev.video_index < len(video_paths):
+        if ev.event_type == "kill" and not ev.shot_anchored and 0 <= ev.video_index < len(video_paths):
             by_video.setdefault(ev.video_index, []).append(i)
     moved = 0
     for vid, idxs in by_video.items():

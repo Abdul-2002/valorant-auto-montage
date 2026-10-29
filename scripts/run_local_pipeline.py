@@ -22,6 +22,7 @@ from src.ai.providers import safe_generate_brief
 from src.ai.providers.base import BriefContext
 from src.ai.schema import MontageScript
 from src.config.loader import load_config
+from src.detection.kill_audio_anchor import snap_kills_to_shots
 from src.detection.kill_frame_refine import snap_kills_to_banner
 from src.pipeline.highlight_detector import detect_highlights
 from src.pipeline.jigsaw_assets import attach_jigsaw_pieces
@@ -70,8 +71,8 @@ def main() -> int:
         payload = json.loads(args.highlights.read_text(encoding="utf-8"))
         highlights = [DetectedEvent.model_validate(h) for h in payload.get("highlights", payload)]
         print(f"  -> {len(highlights)} events", flush=True)
-        print("Phase: snap kill stamps to kill-banner onset...", flush=True)
-        highlights = snap_kills_to_banner(highlights, videos)
+        print("Phase: snap kill stamps to kill-banner onset, then fatal gunshot...", flush=True)
+        highlights = snap_kills_to_shots(snap_kills_to_banner(highlights, videos), videos)
     else:
         print(f"Phase: highlight detection ({len(videos)} video(s))...", flush=True)
         highlights = detect_highlights(video_paths=videos, config=config)

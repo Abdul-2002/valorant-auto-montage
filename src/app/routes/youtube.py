@@ -11,14 +11,16 @@ from fastapi.responses import RedirectResponse
 from src.app.dependencies import get_storage_dir
 from src.app.schemas.youtube import (
     YouTubeChannelsResponse,
+    YouTubeListingResponse,
     YouTubeUploadQueued,
     YouTubeUploadRequest,
     YouTubeUploadStatus,
 )
 from src.library.db import connect, library_db_path
-from src.library.videos import ensure_montage
+from src.library.videos import ensure_montage, get_montage_song_title
 from src.youtube.errors import YouTubeAuthError, YouTubeConfigError, YouTubeUploadError
 from src.youtube.job import resolve_montage_output
+from src.youtube.listing import load_script_duration, load_shot_times, merge_upload_listing, script_path_for_task
 from src.youtube.metadata import clean_metadata
 from src.youtube.oauth import authorization_url, exchange_code, list_my_channels
 from src.youtube.settings import OAuthSettings, oauth_settings
@@ -81,18 +83,48 @@ def youtube_channels(storage_dir: Path = Depends(get_storage_dir)) -> YouTubeCha
         conn.close()
 
 
+@router.get("/listing/{task_id}", response_model=YouTubeListingResponse)
+def youtube_listing_preview(
+    task_id: str,
+    storage_dir: Path = Depends(get_storage_dir),
+) -> YouTubeListingResponse:
+    conn = connect(library_db_path(storage_dir))
+    try:
+        ensure_montage(conn, task_id)
+        listing = _listing_for_task(conn, storage_dir, task_id)
+    finally:
+        conn.close()
+    return YouTubeListingResponse(
+        task_id=task_id,
+        song_title=str(listing["song_title"]),
+        title=str(listing["title"]),
+        description=str(listing["description"]),
+        tags=[str(tag) for tag in listing["tags"]],
+        privacy_status=str(listing["privacy_status"]),
+    )
+
+
 @router.post("/uploads", response_model=YouTubeUploadQueued, status_code=202)
 def queue_youtube_upload(
     body: YouTubeUploadRequest,
     storage_dir: Path = Depends(get_storage_dir),
 ) -> YouTubeUploadQueued:
-    meta = _metadata(body)
-    path = _output_path(storage_dir, body.task_id, str(meta["format"]))
+    path = _output_path(storage_dir, body.task_id, body.format)
     conn = connect(library_db_path(storage_dir))
     try:
         if get_channel(conn, body.channel_id) is None:
             raise HTTPException(status_code=404, detail="channel is not connected")
         ensure_montage(conn, body.task_id)
+        listing = _listing_for_task(
+            conn,
+            storage_dir,
+            body.task_id,
+            title=body.title,
+            description=body.description,
+            tags=body.tags,
+            privacy_status=body.privacy_status,
+        )
+        meta = _metadata_from_listing(body, listing)
         upload_id = insert_upload(
             conn,
             montage_id=body.task_id,
@@ -171,15 +203,44 @@ def _exchange(settings: OAuthSettings, code: str) -> list[dict[str, str]]:
     ]
 
 
-def _metadata(body: YouTubeUploadRequest) -> dict[str, object]:
+def _listing_for_task(
+    conn: sqlite3.Connection,
+    storage_dir: Path,
+    task_id: str,
+    *,
+    title: str = "",
+    description: str = "",
+    tags: list[str] | None = None,
+    privacy_status: str = "public",
+) -> dict[str, object]:
+    song_title = get_montage_song_title(conn, task_id)
+    script_path = script_path_for_task(storage_dir, task_id)
+    merged = merge_upload_listing(
+        song_title=song_title,
+        shot_times_sec=load_shot_times(script_path),
+        title=title,
+        description=description,
+        tags=list(tags or []),
+        privacy_status=privacy_status,
+        duration_sec=load_script_duration(script_path),
+    )
+    merged["song_title"] = song_title
+    merged["tags"] = [str(tag) for tag in merged["tags"]]
+    return merged
+
+
+def _metadata_from_listing(
+    body: YouTubeUploadRequest,
+    listing: dict[str, object],
+) -> dict[str, object]:
     if body.format not in {"16:9", "9:16"}:
         raise HTTPException(status_code=400, detail="format must be 16:9 or 9:16")
     try:
         meta = clean_metadata(
-            title=body.title,
-            description=body.description,
-            tags=body.tags,
-            privacy_status=body.privacy_status,
+            title=str(listing["title"]),
+            description=str(listing["description"]),
+            tags=[str(tag) for tag in listing["tags"]],
+            privacy_status=str(listing["privacy_status"]),
             category_id=body.category_id,
         )
     except YouTubeUploadError as exc:

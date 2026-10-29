@@ -200,6 +200,17 @@ class GunOutlineEffectConfig(BaseModel):
     max_alpha: float = Field(ge=0.1, le=1.0, default=0.9)
 
 
+class GlitterEffectConfig(BaseModel):
+    """Kill-anchored sparkle overlay; effect_mapper rotates the variant across clips."""
+
+    enabled: bool = False
+    variant: Literal["sparkle_field", "star_burst", "streak"] = "sparkle_field"
+    seed: int = Field(ge=0, default=0)
+    life_sec: float = Field(gt=0.2, lt=2.0, default=0.85)
+    density: float = Field(ge=0.2, le=3.0, default=1.0)
+    intensity: float = Field(ge=0.0, le=1.5, default=0.9)
+
+
 class EffectsConfig(BaseModel):
     # Frame-space effects (ghost) before the camera moves the frame; screen-space
     # effects (flash, PiP card) after it so they stay stable.
@@ -224,6 +235,7 @@ class EffectsConfig(BaseModel):
             "letterbox",
             "pip_inset",
             "color_grading",
+            "glitter",
         ]
     )
     velocity: VelocityEffectConfig = Field(default_factory=VelocityEffectConfig)
@@ -245,3 +257,4 @@ class EffectsConfig(BaseModel):
     highlight_bloom: HighlightBloomEffectConfig = Field(default_factory=HighlightBloomEffectConfig)
     light_wrap: LightWrapEffectConfig = Field(default_factory=LightWrapEffectConfig)
     gun_outline: GunOutlineEffectConfig = Field(default_factory=GunOutlineEffectConfig)
+    glitter: GlitterEffectConfig = Field(default_factory=GlitterEffectConfig)

@@ -10,6 +10,7 @@ from src.config.models import (
     CameraEffectConfig,
     ColorGradingEffectConfig,
     EdgeGlowEffectConfig,
+    GlitterEffectConfig,
     HighlightBloomEffectConfig,
     KillHitEffectConfig,
     LensDistortEffectConfig,
@@ -32,6 +33,8 @@ VALID_RECIPES: tuple[str, ...] = ("clean", "punch", "slow", "cinematic")
 HIT_STYLE_CYCLE: tuple[str, ...] = ("flash_blur", "flash_blur", "glow", "flash_shake")
 # Reference style (rafialihsan samples): glow on every other kill.
 REFERENCE_HIT_STYLE_CYCLE: tuple[str, ...] = ("flash_blur", "glow", "flash_shake", "glow")
+# Uneven cycle so neighbouring clips mostly differ but styles recur (Starboy/APT references).
+GLITTER_CYCLE: tuple[str, ...] = ("sparkle_field", "star_burst", "sparkle_field", "streak", "star_burst")
 
 ZOOM_BUDGET_FRACTION: float = 0.45
 MAX_CINEMATIC: int = 2
@@ -122,6 +125,10 @@ def assign_hit_styles(*, n: int, directed: dict[int, str] | None = None, style_f
     return styles
 
 
+def assign_glitter_variants(n: int) -> list[str]:
+    return [GLITTER_CYCLE[i % len(GLITTER_CYCLE)] for i in range(n)]
+
+
 def slowmo_params(*, recipe: str, arc_phase: str) -> tuple[float, float]:
     """(post-kill slow-mo output seconds, speed factor) before the source-fps cap."""
     duration = _SLOWMO_OUT_SEC.get(recipe, 0.0)
@@ -173,6 +180,8 @@ def map_effects(
     scoped: bool = False,
     slowmo_factor: float | None = None,
     pip_style: str = "",
+    glitter_variant: str = "",
+    glitter_seed: int = 0,
 ) -> ScriptClipEffects:
     intensity = _intensity(creative_config=creative_config, brief=brief)
     preset = get_preset(str(inp.arc_phase), intensity)
@@ -203,5 +212,10 @@ def map_effects(
         kill_hit=KillHitEffectConfig(enabled=True, style=hit_style, flash_strength=flash),
         edge_glow=EdgeGlowEffectConfig(enabled=True) if recipe == "cinematic" else None,
         scope_vignette=ScopeVignetteEffectConfig(enabled=True) if scoped else None,
+        glitter=(
+            GlitterEffectConfig(enabled=True, variant=glitter_variant, seed=glitter_seed)  # type: ignore[arg-type]
+            if glitter_variant
+            else None
+        ),
         **extras,
     )

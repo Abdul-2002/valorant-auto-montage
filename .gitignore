@@ -1,11 +1,22 @@
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
 .venv/
+venv/
 .env
 client_secret*.json
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+*.cover
 
 # runtime artifacts
 data/
@@ -22,8 +33,15 @@ artifacts/run26/*
 !artifacts/run26/guns/
 !artifacts/run26/guns/**
 /outputs/
+/runs/
 tmp/
 *.log
+
+# frontend (Vite / Node)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.local
 
 # gameplay / montage video (never commit)
 *.mp4
@@ -33,7 +51,6 @@ tmp/
 *.avi
 *.m4v
 *.DVR.mp4
-!/*.mp4
 !artifacts/run27/**/*.mp4
 reference/tutorials/*.info.json
 # 3.1 GB; GitHub LFS rejects files over 2 GB on Free and Pro
@@ -56,5 +73,9 @@ editing_sfx/
 
 # OS / IDE
 .DS_Store
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
+# Keep .cursor/rules; ignore personal Cursor notes in the folder root
+.cursor/*.md

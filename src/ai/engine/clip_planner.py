@@ -22,6 +22,7 @@ class ClipDirection:
     ghost_candidate: bool = False
     gun_candidate: bool = False
     accent_beats: tuple[float, ...] = ()
+    glitter_variant: str = ""
 
 
 def build_script_clip(
@@ -60,6 +61,8 @@ def build_script_clip(
         scoped=group.scoped,
         slowmo_factor=factor,
         pip_style=direction.pip_style,
+        glitter_variant=direction.glitter_variant,
+        glitter_seed=group.video_index * 100_003 + int(round(group.kill_secs[-1] * 1000)),
     )
     return ScriptClip(
         video_index=group.video_index,

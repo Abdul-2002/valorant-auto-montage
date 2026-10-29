@@ -16,12 +16,21 @@ class YouTubeChannelsResponse(BaseModel):
 class YouTubeUploadRequest(BaseModel):
     task_id: str
     channel_id: str
-    title: str
+    title: str = ""
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    privacy_status: str = "private"
+    privacy_status: str = "public"
     format: str = "16:9"
     category_id: str = "20"
+
+
+class YouTubeListingResponse(BaseModel):
+    task_id: str
+    song_title: str
+    title: str
+    description: str
+    tags: list[str]
+    privacy_status: str
 
 
 class YouTubeUploadQueued(BaseModel):
