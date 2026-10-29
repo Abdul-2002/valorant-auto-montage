@@ -27,6 +27,7 @@ effects:
     - letterbox
     - pip_inset
     - color_grading
+    - glitter
 
   camera:
     enabled: false
@@ -180,8 +181,13 @@ overlays:
   title_sec: 2.4
   song_credit: false
   per_kill_callouts: false
-  multi_kill_callouts: false
+  multi_kill_callouts: true
   lyrics_overlays: false
+  # Mid pop-ins (LIKE/SUBSCRIBE) + end cards (THANKS/LIKE/SUBSCRIBE/COMMENT) + THUMBNAIL outro.
+  engagement_captions: true
+  engagement_mid_popins: true
+  engagement_outro: true
+  engagement_hold_sec: 2.2
 
 transitions:
   enabled: true
@@ -199,14 +205,21 @@ transitions:
 audio:
   mixing:
     enabled: true
-    music_volume_db: 0
+    # Mastered songs peak near 0 dBFS; leave headroom for gunshots and SFX
+    # (the final mix is peak-normalised in the assembler).
+    music_volume_db: -6
     game_sfx_volume_db: -8
+    # At each kill: dip the music, bring the gunshot forward.
+    kill_music_duck_db: -8
+    kill_game_boost_db: 6
+    kill_pre_ms: 40
+    kill_hold_ms: 260
 
   bass_boost:
     enabled: true
-    # v1: keep bass boost active (drops-only is not implemented yet)
+    # Whole-mix gain stays at 0: +4 dB hard-clipped ~15% of samples and flattened gunshots.
     on_drops_only: false
-    boost_db: 4
+    boost_db: 0
     kill_sfx_overlay: true
     sfx_path: "assets/sfx/bass_hit.mp3"
     sfx_gain_db: -6

@@ -34,8 +34,10 @@ def test_should_request_upload_and_readonly_scopes_with_offline_access() -> None
     url = authorization_url(client_id="client", redirect_uri="http://127.0.0.1:8000/youtube/callback", state="abc")
     query = parse_qs(urlparse(url).query)
     assert query["scope"][0] == SCOPES
-    assert "youtube.upload" in query["scope"][0]
-    assert "youtube.readonly" in query["scope"][0]
+    scopes = set(query["scope"][0].split())
+    assert "https://www.googleapis.com/auth/youtube.upload" in scopes
+    assert "https://www.googleapis.com/auth/youtube" in scopes
+    assert "https://www.googleapis.com/auth/youtube.readonly" in scopes
     assert query["access_type"][0] == "offline"
     assert query["prompt"][0] == "consent"
     assert query["state"][0] == "abc"

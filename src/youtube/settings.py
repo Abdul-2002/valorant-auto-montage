@@ -8,8 +8,10 @@ from pathlib import Path
 from src.youtube.errors import YouTubeConfigError
 
 _UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+_YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube"
 _READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
-SCOPES = f"{_UPLOAD_SCOPE} {_READONLY_SCOPE}"
+# Full youtube scope is required for videos.update (title/description/privacy).
+SCOPES = f"{_YOUTUBE_SCOPE} {_UPLOAD_SCOPE} {_READONLY_SCOPE}"
 
 
 @dataclass(frozen=True)

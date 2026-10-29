@@ -9,7 +9,7 @@ from src.ai.enrichment import EnrichedEvent
 from src.ai.engine.arc_modeler import assign_arc_phases
 from src.ai.engine.clip_planner import ClipDirection, build_script_clip
 from src.ai.engine.clip_selector import select_event_indices
-from src.ai.engine.effect_mapper import VALID_RECIPES, assign_hit_styles, assign_recipes
+from src.ai.engine.effect_mapper import VALID_RECIPES, assign_glitter_variants, assign_hit_styles, assign_recipes
 from src.ai.engine.feature_budget import assign_features
 from src.ai.engine.kill_grouping import HOLD_SCORE, KillGroup, fit_groups_to_duration, group_kills, with_locked_finale
 from src.ai.engine.transition_planner import plan_transitions
@@ -170,6 +170,7 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         directed=directed_styles,
         style_fx=str(inp.creative_config_resolved.get("style_fx", "")),
     )
+    glitter = assign_glitter_variants(len(groups))
     features = assign_features(
         recipes=recipes,
         kill_counts=[len(g.events) for g in groups],
@@ -188,6 +189,7 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
                 ghost_candidate=features[i].ghost_candidate,
                 gun_candidate=features[i].gun_candidate,
                 accent_beats=tuple(_accent_beats(inp.beat_map, p)),
+                glitter_variant=glitter[i],
             ),
             velocity=inp.velocity,
             creative_config=inp.creative_config_resolved,

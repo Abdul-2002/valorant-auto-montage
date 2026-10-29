@@ -71,3 +71,35 @@ def test_should_extrude_title_sprite_beyond_flat_sprite() -> None:
     deep = text_sprite_3d("ACE", size=72, color=(255, 255, 255), depth_color=(26, 66, 85), glow=(80, 200, 255))
     assert deep.shape[0] > flat.shape[0] and deep.shape[1] > flat.shape[1]
     assert (deep[:, :, 3] > 0).sum() > (flat[:, :, 3] > 0).sum()
+
+
+def test_should_plan_engagement_mid_end_and_thumbnail() -> None:
+    script = MontageScript(
+        clips=[
+            _clip(output_start_sec=0.0, output_end_sec=8.0, kill_output_times_sec=[1.0]),
+            _clip(output_start_sec=10.0, output_end_sec=18.0, kill_output_times_sec=[2.0]),
+            _clip(output_start_sec=22.0, output_end_sec=40.0, kill_output_times_sec=[3.0]),
+        ]
+    )
+    cfg = OverlaysConfig(
+        title_text="",
+        song_credit=False,
+        per_kill_callouts=False,
+        multi_kill_callouts=False,
+        lyrics_overlays=False,
+        engagement_captions=True,
+        engagement_mid_popins=True,
+        engagement_outro=True,
+        engagement_hold_sec=2.0,
+    )
+    plan = build_overlay_plan(script=script, beat_map=None, cfg=cfg, song_title="", phase_sec=0.0)
+    labels = [e.text for e in plan.texts]
+    assert "LIKE" in labels
+    assert "SUBSCRIBE" in labels
+    assert "THANKS FOR WATCHING" in labels
+    assert "COMMENT" in labels
+    assert "THUMBNAIL" in labels
+    assert any(e.kind == "title" and e.text == "THUMBNAIL" for e in plan.texts)
+    # End sequence sits in the last stretch of the montage.
+    thanks = next(e for e in plan.texts if e.text == "THANKS FOR WATCHING")
+    assert thanks.at_sec >= 25.0

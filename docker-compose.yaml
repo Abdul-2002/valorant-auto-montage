@@ -17,6 +17,7 @@ services:
     environment:
       # Only show containers for this project.
       - CONTAINER_NAME_PREFIX=valorant-montage-bot-
+      - API_PROXY_TARGET=http://api:8000
     restart: unless-stopped
 
   api:

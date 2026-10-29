@@ -20,7 +20,7 @@ def _project_root() -> Path:
 class BassBoostEffect(AudioEffect):
     enabled: bool = True
     on_drops_only: bool = True
-    boost_db: float = 4.0
+    boost_db: float = 0.0
     kill_sfx_overlay: bool = True
     sfx_path: str | None = "assets/sfx/bass_hit.mp3"
     sfx_gain_db: float = -6.0

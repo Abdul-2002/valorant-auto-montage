@@ -109,6 +109,16 @@ def ensure_montage(conn: sqlite3.Connection, montage_id: str, song_title: str = 
     conn.commit()
 
 
+def get_montage_song_title(conn: sqlite3.Connection, montage_id: str) -> str:
+    row = conn.execute(
+        "SELECT song_title FROM montages WHERE id = ?",
+        (montage_id,),
+    ).fetchone()
+    if row is None:
+        return ""
+    return str(row["song_title"] or "")
+
+
 def link_source(conn: sqlite3.Connection, montage_id: str, video_id: str, ordinal: int) -> None:
     conn.execute(
         """

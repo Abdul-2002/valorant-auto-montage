@@ -2,12 +2,35 @@ import express from "express";
 import Docker from "dockerode";
 import path from "path";
 import fs from "fs";
+import http from "http";
+import https from "https";
 
 const app = express();
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 
 const PORT = Number(process.env.PORT || 3000);
 const NAME_PREFIX = process.env.CONTAINER_NAME_PREFIX || "valorant-montage-bot-";
+const API_PROXY_TARGET = process.env.API_PROXY_TARGET || "http://127.0.0.1:8000";
+
+function proxyApi(req, res) {
+  let target;
+  try {
+    target = new URL(req.originalUrl, API_PROXY_TARGET);
+  } catch {
+    res.status(500).json({ detail: "API proxy target is invalid" });
+    return;
+  }
+  const lib = target.protocol === "https:" ? https : http;
+  const headers = { ...req.headers, host: target.host };
+  const upstream = lib.request(target, { method: req.method, headers }, (proxied) => {
+    res.writeHead(proxied.statusCode || 502, proxied.headers);
+    proxied.pipe(res);
+  });
+  upstream.on("error", () => {
+    if (!res.headersSent) res.status(502).json({ detail: "Montage API is not reachable" });
+  });
+  req.pipe(upstream);
+}
 
 function normalizeName(n) {
   if (!n) return "";
@@ -201,11 +224,13 @@ app.get("/api/containers/:id/logs", async (req, res) => {
   stream.on("error", end);
 });
 
+app.use("/montage", proxyApi);
+app.use("/youtube", proxyApi);
+
 // Serve built frontend if present; otherwise show a helpful message.
 const distDir = path.resolve(process.cwd(), "dist");
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
-  app.get("/", (_req, res) => res.redirect(302, "/logs"));
   app.get("*", (_req, res) => res.sendFile(path.join(distDir, "index.html")));
 } else {
   app.get("/", (_req, res) => {
