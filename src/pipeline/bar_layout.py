@@ -158,7 +158,12 @@ def _origin_bar(
 
     Lead-in clips sit in the bars before that chorus. If the tail would run off
     the song, the whole block slides earlier and the run still overlaps the chorus.
+
+    When the music bed already opens on an intro (contiguous / spliced edit),
+    keep origin at bar 0 so the build-up is not trimmed away.
     """
+    if beat_map.sections and str(beat_map.sections[0].section_type) == "intro":
+        return 0
     chorus = _first_chorus_bar(bar_times, beat_map)
     if chorus is None:
         return 0

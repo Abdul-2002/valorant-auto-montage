@@ -22,8 +22,22 @@ ENDING_LABELS = frozenset({"end", "outro"})
 _BODY_PRIORITY = {"chorus": 0, "drop": 0, "inst": 1, "solo": 1, "bridge": 2, "verse": 3, "break": 4}
 INTRO_MAX_BARS = 8
 MIN_PIECE_BARS = 4
+# Minimum chorus body that must fit after the first hook for a contiguous bed to win.
+_CONTIGUOUS_CHORUS_BODY_SEC = 16.0
 # 30ms reads as a hard cut across section jumps; 300ms softens intro→chorus teleports.
 SPLICE_XFADE_MS = 300
+
+
+def natural_arc_fits(structure: SongStructure, needed_sec: float, *, chorus_body_sec: float = _CONTIGUOUS_CHORUS_BODY_SEC) -> bool:
+    """True when intro→…→first chorus (+ body) already fits inside ``needed_sec``.
+
+    Teleport splices then do more harm than good: phase/harmony jumps read as
+    distortion even with a crossfade.
+    """
+    first = next((s for s in structure.segments if s.label in HIGH_ENERGY_LABELS), None)
+    if first is None:
+        return True
+    return float(first.start_sec) + float(chorus_body_sec) <= float(needed_sec)
 
 
 @dataclass(frozen=True)
@@ -199,14 +213,21 @@ def prepare_edited_track(
     Default ``splice=False``: play the song A→Z as a contiguous prefix of
     ``needed_sec`` (intro→verse→chorus in order). No section teleports.
 
-    ``splice=True``: legacy intro + high-energy body + ending stitch (can jump).
+    ``splice=True``: prefer contiguous when the natural intro→chorus arc already
+    fits; otherwise stitch intro + high-energy body + ending (can jump).
     """
     from src.pipeline.beat_analyzer import analyze_beats, beat_map_from_structure
     from src.pipeline.song_structure import SongStructureError, analyze_song_structure
 
     try:
         structure = analyze_song_structure(audio_path, cache_dir=cache_dir)
-        if not splice:
+        use_contiguous = (not splice) or natural_arc_fits(structure, float(needed_sec))
+        if splice and use_contiguous:
+            log.info(
+                "music_edit: natural intro→chorus fits in %.1fs; using contiguous bed (no teleports)",
+                float(needed_sec),
+            )
+        if use_contiguous:
             # Pad slightly past target so fade-out / duration drift still has music.
             dur = max(float(needed_sec) + 2.0, float(needed_sec))
             edited = render_contiguous_track(

@@ -40,6 +40,35 @@ def test_should_keep_a_weak_single_at_one_bar_and_not_stretch_the_finale() -> No
     assert plans[2].output_end_sec < 40.0
 
 
+def test_should_keep_origin_at_zero_when_bed_opens_on_intro() -> None:
+    beats = [i * _INTERVAL for i in range(81)]
+    beat_map = BeatMap(
+        tempo_bpm=120.0,
+        beat_times=beats,
+        onset_times=[],
+        rms=[],
+        sections=[
+            BeatSection(0.0, 8.0, "intro", 0.3),
+            BeatSection(8.0, 16.0, "verse", 0.4),
+            BeatSection(16.0, 40.0, "chorus", 0.8),
+        ],
+        beat_strengths=[0.9] * len(beats),
+        downbeat_times=beats[::4],
+    )
+    plans = plan_on_bars(
+        beat_map=beat_map,
+        demands=[
+            ClipDemand(fixed_bars=1, pre_beats=2),
+            ClipDemand(fixed_bars=1, pre_beats=2),
+            ClipDemand(src_kill_gaps=(1.0, 1.0, 1.0), fixed_bars=4),
+            ClipDemand(src_kill_gaps=(1.0,), fixed_bars=2),
+        ],
+        song_end_sec=40.0,
+    )
+    assert plans
+    assert abs(plans[0].output_start_sec - 0.0) < 1e-6
+
+
 def test_should_open_the_longest_run_on_the_first_chorus() -> None:
     beats = [i * _INTERVAL for i in range(81)]
     beat_map = BeatMap(
