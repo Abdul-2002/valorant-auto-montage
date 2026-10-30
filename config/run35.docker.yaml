@@ -215,9 +215,10 @@ audio:
     game_sfx_volume_db: -5
     # At each kill: dip the music, bring the gunshot forward.
     kill_music_duck_db: -8
-    kill_game_boost_db: 10
+    # 10 dB was audible punch but pumped the sidechain; 8 keeps shots forward.
+    kill_game_boost_db: 8
     kill_pre_ms: 40
-    kill_hold_ms: 280
+    kill_hold_ms: 240
 
   bass_boost:
     enabled: true

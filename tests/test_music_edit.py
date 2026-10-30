@@ -1,4 +1,4 @@
-from src.pipeline.music_edit import SongPiece, _truncate_structure, remap_time
+from src.pipeline.music_edit import SongPiece, _truncate_structure, natural_arc_fits, remap_time
 from src.pipeline.song_structure import SongSegment, SongStructure
 
 
@@ -8,6 +8,21 @@ def test_should_map_source_times_through_spliced_pieces() -> None:
     assert remap_time(20.0, pieces) is None
     assert abs(remap_time(40.0, pieces) - 8.0) < 1e-9
     assert abs(remap_time(56.0, pieces) - 24.0) < 1e-9
+
+
+def test_should_prefer_contiguous_when_first_chorus_fits_in_window() -> None:
+    structure = SongStructure(
+        bpm=140.0,
+        beats=[0.0, 0.5],
+        downbeats=[0.0],
+        segments=[
+            SongSegment(0.0, 14.0, "intro"),
+            SongSegment(14.0, 60.0, "verse"),
+            SongSegment(60.0, 90.0, "chorus"),
+        ],
+    )
+    assert natural_arc_fits(structure, 85.0) is True
+    assert natural_arc_fits(structure, 70.0) is False
 
 
 def test_should_truncate_structure_to_contiguous_window() -> None:
