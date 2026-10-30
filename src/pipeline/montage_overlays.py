@@ -23,8 +23,8 @@ _LEAK_COLORS = ((255, 140, 60), (255, 70, 150), (70, 190, 255))
 
 # Burst size → Valorant-style callout (clip-local multi-kill).
 BURST_TEXT = {2: "DOUBLE KILL", 3: "TRIPLE KILL", 4: "QUADRA KILL", 5: "ACE"}
-_MID_ENGAGE = ("LIKE", "SUBSCRIBE", "COMMENT")
-_END_ENGAGE = ("THANKS FOR WATCHING", "LIKE", "SUBSCRIBE", "COMMENT")
+# Production engagement: only these three — no THANKS / THUMBNAIL spam.
+_ENGAGE_LABELS = ("LIKE", "SUBSCRIBE", "COMMENT")
 TextKind = Literal["title", "credit", "kill", "burst", "lyric", "engage"]
 
 _STYLE: dict[str, tuple[tuple[int, int, int], tuple[int, int, int], int, float]] = {
@@ -152,7 +152,7 @@ def _engagement_events(
     mid: bool,
     outro: bool,
 ) -> list[TextEvent]:
-    """Mid pop-ins on calm clip heads, end cards in the last seconds, optional thumbnail title."""
+    """Mid pop-ins on calm clip heads; end cards = LIKE / SUBSCRIBE / COMMENT only."""
     out: list[TextEvent] = []
     end = _montage_end(script, phase_sec)
     if end <= 0.5:
@@ -165,26 +165,24 @@ def _engagement_events(
             if (c.output_start_sec or 0.0) > 1.0
         ]
         used = 0
+        reserved = hold * len(_ENGAGE_LABELS) if outro else 0.0
         for at in slots:
-            if used >= len(_MID_ENGAGE):
+            if used >= len(_ENGAGE_LABELS):
                 break
-            if at < 4.0 or at > end - (hold * (len(_END_ENGAGE) + 1.5)):
+            if at < 4.0 or at > end - (reserved + hold):
                 continue
             if _near_kill(at, kill_times):
                 continue
-            out.append(TextEvent(at, _MID_ENGAGE[used], "engage", hold))
+            out.append(TextEvent(at, _ENGAGE_LABELS[used], "engage", hold))
             used += 1
 
-    cards = list(_END_ENGAGE)
     if outro:
-        cards.append("THUMBNAIL")
-    need = hold * len(cards)
-    start = max(0.5, end - need)
-    # If the montage is short, squeeze holds so the sequence still fits.
-    step = hold if need <= end else max(0.9, end / max(1, len(cards)))
-    for i, label in enumerate(cards):
-        kind: TextKind = "title" if label == "THUMBNAIL" else "engage"
-        out.append(TextEvent(start + i * step, label, kind, min(hold, step)))
+        cards = list(_ENGAGE_LABELS)
+        need = hold * len(cards)
+        start = max(0.5, end - need)
+        step = hold if need <= end else max(0.9, end / max(1, len(cards)))
+        for i, label in enumerate(cards):
+            out.append(TextEvent(start + i * step, label, "engage", min(hold, step)))
     return out
 
 

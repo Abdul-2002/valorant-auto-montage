@@ -38,7 +38,8 @@ _CHORUS_SECTIONS = frozenset({"chorus", "drop"})
 BARS_BY_SECTION: dict[str, int] = {"chorus": 2, "drop": 2, "inst": 2, "solo": 2}
 DEFAULT_BARS = 3
 MAX_BARS_PER_CLIP = 4
-FINALE_MAX_BARS = 6
+# Finale rides the closing chorus/drop; allow a longer last spray on the beat drop.
+FINALE_MAX_BARS = 8
 
 
 def bars_needed(demand: ClipDemand, beat_interval: float) -> int:
@@ -49,7 +50,8 @@ def bars_needed(demand: ClipDemand, beat_interval: float) -> int:
     return max(2, math.ceil((PRE_BEATS_TARGET + 1 + internal + POST_BEATS_MIN) / BEATS_PER_BAR))
 
 
-TARGET_AVG_BARS = 2.5
+# Slightly denser than 2.5 so more kill bursts fit before the bed ends.
+TARGET_AVG_BARS = 2.0
 
 
 def estimate_montage_seconds(demands: Sequence[ClipDemand], *, beat_interval: float) -> float:
