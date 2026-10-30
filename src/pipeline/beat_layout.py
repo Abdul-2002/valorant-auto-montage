@@ -20,7 +20,7 @@ STRONG_ACCENT_PERCENTILE: float = 70.0
 
 # Output run-up before the first kill of a clip, in beats.
 PRE_BEATS_MIN: int = 2
-PRE_BEATS_TARGET: int = 3
+PRE_BEATS_TARGET: int = 4
 PRE_BEATS_MAX: int = 4
 # Beats between the last kill of one clip and the first kill of the next.
 GAP_BEATS_MIN: int = 4

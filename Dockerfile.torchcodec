@@ -2,6 +2,10 @@
 # under WSL). torchaudio>=2.9 routes load/save through torchcodec, so demucs
 # vocal separation fails without it. 0.17.0 verified against torch 2.14.1 /
 # torchaudio 2.11.0 and the image's FFmpeg 7.1 shared libs.
+#
+# all-in-one-infer: labeled intro/verse/chorus/outro for music_edit splices.
 FROM valorant-montage-bot-render:latest
 
-RUN pip install --no-cache-dir --no-deps torchcodec==0.17.0
+# torchcodec 0.17.0 is already on the base image; reinstall trips intermittent
+# PyPI hash mismatches under WSL. Only layer the structure analyzer here.
+RUN pip install --no-cache-dir "all-in-one-infer==3.1.0"

@@ -88,5 +88,5 @@ def test_should_keep_the_biggest_spray_burst_last_when_a_round_is_joined() -> No
 def test_should_assign_one_bar_to_a_weak_single_and_three_to_a_strong_single() -> None:
     weak = group_kills([_ev(10, score=0.4)])[0].demand()
     strong = group_kills([_ev(10, score=0.75)])[0].demand()
-    assert weak.fixed_bars == 1 and weak.pre_beats == 2
+    assert weak.fixed_bars == 1 and weak.pre_beats == 3
     assert strong.fixed_bars == 3 and strong.pre_beats is None

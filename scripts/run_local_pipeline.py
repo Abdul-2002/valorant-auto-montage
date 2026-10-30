@@ -87,7 +87,11 @@ def main() -> int:
 
     print("Phase: music edit + beat analysis...", flush=True)
     music_for_render, beat_map = prepare_edited_track(
-        music, cache_dir=out / "song", needed_sec=float(config.output.target_duration_sec)
+        music,
+        cache_dir=out / "song",
+        needed_sec=float(config.output.target_duration_sec),
+        # Intro → hooks/chorus body → real ending (needs all-in-one-infer structure).
+        splice=True,
     )
     print(
         f"  -> tempo ~{getattr(beat_map, 'tempo_bpm', None)} bpm, track={music_for_render.name}, "

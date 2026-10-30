@@ -103,7 +103,10 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
     if music_src is not None:
         try:
             music_for_render, beat_map = prepare_edited_track(
-                music_src, cache_dir=tdir / "song", needed_sec=float(config.output.target_duration_sec)
+                music_src,
+                cache_dir=tdir / "song",
+                needed_sec=float(config.output.target_duration_sec),
+                splice=True,
             )
         except Exception:
             beat_map = None

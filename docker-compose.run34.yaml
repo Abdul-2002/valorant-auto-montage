@@ -1,0 +1,50 @@
+# Run 34 via Docker-in-WSL: 10 VODs + HandClap, polish pass (no text spam, louder shots).
+#
+# From Ubuntu WSL:
+#   cd /mnt/c/Users/aasid/OneDrive/Documents/valorant-montage-bot
+#   docker compose -f docker-compose.run34.yaml run --rm render
+#
+services:
+  render:
+    image: valorant-montage-bot-render:torchcodec
+    build:
+      context: .
+      dockerfile: Dockerfile.torchcodec
+    working_dir: /app
+    mem_limit: 6g
+    memswap_limit: 8g
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MONTAGE_CONFIG_PATH=/app/config/default.yaml
+      - FFMPEG_FORCE_LIBX264=1
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENCV_FFMPEG_CAPTURE_OPTIONS=threads;1
+    volumes:
+      - .:/app
+      - ./artifacts/run34:/app/artifacts/run34
+      - ./models:/app/models
+      - /mnt/d/Videos/Valorant:/videos:ro
+      - /mnt/c/Users/aasid/Music:/music:ro
+    command:
+      - python
+      - scripts/run_local_pipeline.py
+      - --video
+      - /videos/Valorant 2026.10.24 - 18.04.52.27.DVR.mp4
+      - /videos/Valorant 2026.10.23 - 23.07.34.24.DVR.mp4
+      - /videos/Valorant 2026.10.23 - 22.55.57.23.DVR.mp4
+      - /videos/Valorant 2026.10.23 - 22.53.05.22.DVR.mp4
+      - /videos/Valorant 2026.10.23 - 22.23.24.21.DVR.mp4
+      - /videos/Valorant 2026.10.20 - 15.31.23.17.DVR.mp4
+      - /videos/Valorant 2026.10.20 - 15.28.49.16.DVR.mp4
+      - /videos/Valorant 2026.10.20 - 14.55.33.15.DVR.mp4
+      - /videos/Valorant 2026.10.20 - 14.54.48.14.DVR.mp4
+      - /videos/Valorant 2026.10.20 - 14.50.15.13.DVR.mp4
+      - --music
+      - /app/HandClap - Fitz and the Tantrums.mp3
+      - --out
+      - /app/artifacts/run34
+      - --config
+      - /app/config/run34.docker.yaml
+      - --highlights
+      - /app/artifacts/run34/highlights.json
