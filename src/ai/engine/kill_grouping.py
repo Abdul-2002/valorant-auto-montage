@@ -21,7 +21,8 @@ ROUND_SPAN_SEC: float = 28.0
 ROUND_MIN_KILLS: int = 3
 # Isolated kills at this score keep a 4–5s hold. Weaker ones are the kill only.
 HOLD_SCORE: float = 0.73
-HOLD_BARS: int = 3
+# Shorter holds pack more bursts into the song bed; finale still gets grown bars.
+HOLD_BARS: int = 2
 PUNCH_BARS: int = 1
 # Lead-in beats before the kill so the flick / crosshair placement is visible.
 PUNCH_PRE_BEATS: int = 3

@@ -65,11 +65,11 @@ class OverlaysConfig(BaseModel):
     multi_kill_callouts: bool = True
     # Timed lyric/hook lines from the music-understanding layer (P2).
     lyrics_overlays: bool = True
-    # Engagement captions: mid-montage pop-ins + end cards + closing thumbnail title.
+    # Engagement captions: mid + end LIKE/SUBSCRIBE/COMMENT only (no THUMBNAIL).
     engagement_captions: bool = False
     engagement_mid_popins: bool = True
     engagement_outro: bool = True
-    engagement_hold_sec: float = Field(gt=0.8, le=5.0, default=2.2)
+    engagement_hold_sec: float = Field(gt=0.8, le=5.0, default=2.0)
     # TTF/OTF font; empty tries Impact / Arial Bold / DejaVu Sans Bold.
     font_path: str = ""
 

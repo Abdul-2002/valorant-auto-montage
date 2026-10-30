@@ -73,7 +73,7 @@ def test_should_extrude_title_sprite_beyond_flat_sprite() -> None:
     assert (deep[:, :, 3] > 0).sum() > (flat[:, :, 3] > 0).sum()
 
 
-def test_should_plan_engagement_mid_end_and_thumbnail() -> None:
+def test_should_plan_like_subscribe_comment_without_thumbnail() -> None:
     script = MontageScript(
         clips=[
             _clip(output_start_sec=0.0, output_end_sec=8.0, kill_output_times_sec=[1.0]),
@@ -82,7 +82,7 @@ def test_should_plan_engagement_mid_end_and_thumbnail() -> None:
         ]
     )
     cfg = OverlaysConfig(
-        title_text="",
+        title_text="Lost SI",
         song_credit=False,
         per_kill_callouts=False,
         multi_kill_callouts=False,
@@ -94,12 +94,12 @@ def test_should_plan_engagement_mid_end_and_thumbnail() -> None:
     )
     plan = build_overlay_plan(script=script, beat_map=None, cfg=cfg, song_title="", phase_sec=0.0)
     labels = [e.text for e in plan.texts]
-    assert "LIKE" in labels
+    assert labels.count("LIKE") >= 1
     assert "SUBSCRIBE" in labels
-    assert "THANKS FOR WATCHING" in labels
     assert "COMMENT" in labels
-    assert "THUMBNAIL" in labels
-    assert any(e.kind == "title" and e.text == "THUMBNAIL" for e in plan.texts)
+    assert "THANKS FOR WATCHING" not in labels
+    assert "THUMBNAIL" not in labels
+    assert any(e.kind == "title" and e.text == "Lost SI" for e in plan.texts)
     # End sequence sits in the last stretch of the montage.
-    thanks = next(e for e in plan.texts if e.text == "THANKS FOR WATCHING")
-    assert thanks.at_sec >= 25.0
+    end_like = max(e.at_sec for e in plan.texts if e.text == "LIKE")
+    assert end_like >= 25.0

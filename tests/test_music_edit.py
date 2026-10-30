@@ -1,4 +1,10 @@
-from src.pipeline.music_edit import SongPiece, _truncate_structure, natural_arc_fits, remap_time
+from src.pipeline.music_edit import (
+    SongPiece,
+    _truncate_structure,
+    contiguous_bed_duration,
+    natural_arc_fits,
+    remap_time,
+)
 from src.pipeline.song_structure import SongSegment, SongStructure
 
 
@@ -23,6 +29,21 @@ def test_should_prefer_contiguous_when_first_chorus_fits_in_window() -> None:
     )
     assert natural_arc_fits(structure, 85.0) is True
     assert natural_arc_fits(structure, 70.0) is False
+
+
+def test_should_snap_contiguous_bed_to_chorus_section_end() -> None:
+    structure = SongStructure(
+        bpm=140.0,
+        beats=[0.0, 0.5],
+        downbeats=[0.0],
+        segments=[
+            SongSegment(0.0, 14.0, "intro"),
+            SongSegment(14.0, 61.0, "verse"),
+            SongSegment(61.0, 75.0, "chorus"),
+            SongSegment(75.0, 90.0, "chorus"),
+        ],
+    )
+    assert abs(contiguous_bed_duration(structure, 85.0) - 90.0) < 1e-6
 
 
 def test_should_truncate_structure_to_contiguous_window() -> None:

@@ -40,6 +40,32 @@ def natural_arc_fits(structure: SongStructure, needed_sec: float, *, chorus_body
     return float(first.start_sec) + float(chorus_body_sec) <= float(needed_sec)
 
 
+def contiguous_bed_duration(
+    structure: SongStructure,
+    needed_sec: float,
+    *,
+    max_extend_sec: float = 24.0,
+) -> float:
+    """Snap the contiguous bed to a high-energy section end near ``needed_sec``.
+
+    Ending mid-chorus with a fade reads as a weak cut. Prefer the end of the
+    last chorus/drop that started before the target (extend slightly if needed).
+    """
+    target = float(needed_sec)
+    ends = [
+        float(s.end_sec)
+        for s in structure.segments
+        if s.label in HIGH_ENERGY_LABELS and float(s.start_sec) < target + 1e-3
+    ]
+    if not ends:
+        return max(target + 2.0, target)
+    after = sorted(e for e in ends if e >= target - 1e-3)
+    if after and after[0] - target <= float(max_extend_sec):
+        return after[0]
+    before = [e for e in ends if e <= target]
+    return max(before) if before else target + 2.0
+
+
 @dataclass(frozen=True)
 class SongPiece:
     src_start: float
@@ -228,8 +254,12 @@ def prepare_edited_track(
                 float(needed_sec),
             )
         if use_contiguous:
-            # Pad slightly past target so fade-out / duration drift still has music.
-            dur = max(float(needed_sec) + 2.0, float(needed_sec))
+            dur = contiguous_bed_duration(structure, float(needed_sec))
+            log.info(
+                "music_edit: contiguous bed %.1fs (target %.1fs) ending on section boundary",
+                dur,
+                float(needed_sec),
+            )
             edited = render_contiguous_track(
                 audio_path, cache_dir / "music_contiguous.wav", duration_sec=dur
             )

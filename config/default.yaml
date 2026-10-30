@@ -177,17 +177,17 @@ overlays:
   light_leak_strength: 0.35
   flare_streaks: true
   flare_strength: 0.8
-  title_text: ""
+  title_text: "Lost SI"
   title_sec: 2.4
   song_credit: false
   per_kill_callouts: false
-  multi_kill_callouts: true
+  multi_kill_callouts: false
   lyrics_overlays: false
-  # Mid pop-ins (LIKE/SUBSCRIBE) + end cards (THANKS/LIKE/SUBSCRIBE/COMMENT) + THUMBNAIL outro.
+  # Mid + end: LIKE / SUBSCRIBE / COMMENT only (no THANKS / THUMBNAIL).
   engagement_captions: true
   engagement_mid_popins: true
   engagement_outro: true
-  engagement_hold_sec: 2.2
+  engagement_hold_sec: 2.0
 
 transitions:
   enabled: true
