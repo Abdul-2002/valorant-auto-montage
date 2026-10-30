@@ -23,7 +23,8 @@ ROUND_MIN_KILLS: int = 3
 HOLD_SCORE: float = 0.73
 HOLD_BARS: int = 3
 PUNCH_BARS: int = 1
-PUNCH_PRE_BEATS: int = 2
+# Lead-in beats before the kill so the flick / crosshair placement is visible.
+PUNCH_PRE_BEATS: int = 3
 
 
 @dataclass(frozen=True)

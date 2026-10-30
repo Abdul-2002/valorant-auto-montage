@@ -61,21 +61,31 @@ def _to_wav(audio_path: Path, work_dir: Path) -> Path:
     return wav
 
 
+def _pick_device() -> str:
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
 def _run_allin1(wav: Path, work_dir: Path) -> SongStructure:
     try:
         import allin1_infer
     except ImportError as exc:
         raise SongStructureError("all-in-one-infer is not installed") from exc
+    device = _pick_device()
     try:
         result = allin1_infer.analyze(
             str(wav),
-            device="cuda",
+            device=device,
             demix_dir=str(work_dir / "_demix"),
             spec_dir=str(work_dir / "_spec"),
             multiprocess=False,
         )
     except Exception as exc:
-        raise SongStructureError(f"allin1 analysis failed for {wav.name}: {exc}") from exc
+        raise SongStructureError(f"allin1 analysis failed for {wav.name} on {device}: {exc}") from exc
     return SongStructure(
         bpm=float(result.bpm),
         beats=[float(b) for b in result.beats],

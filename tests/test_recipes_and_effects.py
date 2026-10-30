@@ -56,6 +56,8 @@ def test_should_move_the_camera_on_every_recipe() -> None:
     assert _effects("punch").camera.crash_zoom > 0.0
     assert _effects("slow").camera.push_in > 0.0
     assert _effects("clean").zoom is None
+    assert _effects("punch").zoom is not None and _effects("punch").zoom.enabled
+    assert _effects("slow").zoom is not None and float(_effects("slow").zoom.max_zoom) > 1.0
     assert _effects("punch").shake is None
 
 

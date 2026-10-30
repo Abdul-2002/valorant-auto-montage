@@ -19,6 +19,7 @@ from src.config.models import (
     RgbSplitEffectConfig,
     ScopeVignetteEffectConfig,
     VelocityEffectConfig,
+    ZoomEffectConfig,
 )
 from src.effects.presets.valorant import get_preset
 
@@ -39,10 +40,11 @@ GLITTER_CYCLE: tuple[str, ...] = ("sparkle_field", "star_burst", "sparkle_field"
 ZOOM_BUDGET_FRACTION: float = 0.45
 MAX_CINEMATIC: int = 2
 _PHASE_ROTATION: dict[str, tuple[str, ...]] = {
-    "intro": ("clean", "slow"),
-    "build": ("slow", "punch", "slow", "punch"),
-    "climax": ("punch", "slow"),
-    "outro": ("slow",),
+    # Slow-mo biased: punch stays for accents, but most clips must ramp on impact.
+    "intro": ("slow", "clean"),
+    "build": ("slow", "slow", "punch", "slow"),
+    "climax": ("slow", "punch"),
+    "outro": ("slow", "cinematic"),
 }
 # Output seconds of post-kill slow-mo and its speed, per recipe.
 _SLOWMO_OUT_SEC: dict[str, float] = {"slow": 0.9, "cinematic": 1.2}
@@ -147,6 +149,17 @@ def _camera_for(recipe: str) -> CameraEffectConfig:
     return CameraEffectConfig(enabled=True, crash_zoom=0.0, push_in=0.0, beat_pulse=0.02, kill_shake_px=6.0)
 
 
+def _zoom_for(recipe: str) -> ZoomEffectConfig | None:
+    """Short crosshair-centered punch-in to hide HUD clutter around the kill."""
+    if recipe == "punch":
+        return ZoomEffectConfig(enabled=True, max_zoom=1.22, duration_sec=0.35, crash_in_frac=0.4)
+    if recipe == "cinematic":
+        return ZoomEffectConfig(enabled=True, max_zoom=1.18, duration_sec=0.4, crash_in_frac=0.35)
+    if recipe == "slow":
+        return ZoomEffectConfig(enabled=True, max_zoom=1.12, duration_sec=0.3, crash_in_frac=0.3)
+    return None
+
+
 def _pip_for(pip_style: str) -> PipInsetEffectConfig | None:
     if pip_style not in PIP_STYLES:
         return None
@@ -206,6 +219,7 @@ def map_effects(
     return ScriptClipEffects(
         velocity=velocity,
         camera=_camera_for(recipe),
+        zoom=_zoom_for(recipe),
         # Reference path never gets PiP cards (feature_budget also zeroes pip_style).
         pip_inset=None if reference else _pip_for(pip_style),
         color_grading=ColorGradingEffectConfig.model_validate({"enabled": True, **grade}),

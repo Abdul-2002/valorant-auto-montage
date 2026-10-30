@@ -46,12 +46,15 @@ def _bar_mode(beat_map: BeatMap | None) -> bool:
 
 
 def _start_beat_index(beat_map: BeatMap | None, target_sec: float) -> int:
-    """First beat of the first chorus/drop, pulled earlier if the song would run out."""
+    """Start at song t=0 so intro/build-up is heard; clamp only if the track is too short."""
     if beat_map is None or not beat_map.beat_times:
         return 0
     beats = sorted(float(b) for b in beat_map.beat_times)
-    start_t = next((float(s.start_sec) for s in beat_map.sections or [] if s.section_type in ("drop", "chorus")), 0.0)
-    start_t = min(start_t, max(0.0, beats[-1] - float(target_sec) * 1.1))
+    # Keep the cold-open at the start. Chorus alignment is handled by bar_layout
+    # (lead-in clips before the first chorus) when downbeats exist.
+    start_t = 0.0
+    if beats[-1] < float(target_sec) * 1.1:
+        start_t = max(0.0, beats[-1] - float(target_sec) * 1.1)
     return next((i for i, b in enumerate(beats) if b >= start_t), 0)
 
 
