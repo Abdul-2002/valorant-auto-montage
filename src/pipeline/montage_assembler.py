@@ -430,13 +430,17 @@ def render_montage(
             style_push_head,
             style_whip_head,
             style_whip_tail,
+            style_zigzag_head,
+            style_zoom_settle_head,
         )
 
         flash_dur = max(0.02, float(config.transitions.flash_duration_sec))
         whip_dur = max(0.05, float(getattr(config.transitions, "whip_duration_sec", 0.14) or 0.14))
         push_dur = max(0.05, float(getattr(config.transitions, "push_duration_sec", 0.12) or 0.12))
         pop_dur = 0.22
+        jigsaw_settle_dur = 0.18
         whoosh_times_sec: list[float] = []
+        jigsaw_in_count = 0
         styled: list[Any] = []
         for idx, clip in enumerate(clips):
             nxt = clip
@@ -459,7 +463,14 @@ def render_montage(
                 elif t_name == "push":
                     nxt = style_push_head(nxt, duration_sec=push_dur if t_dur <= 0 else t_dur)
                 elif t_name == "jigsaw":
+                    # Pieces already assembled on the outgoing tail; add motion as
+                    # the live incoming clip starts (Rafi-style settle — keep jigsaw).
                     whoosh_times_sec.append(sum(float(getattr(c, "duration", 0.0) or 0.0) for c in styled))
+                    if jigsaw_in_count % 2 == 0:
+                        nxt = style_zoom_settle_head(nxt, duration_sec=jigsaw_settle_dur)
+                    else:
+                        nxt = style_zigzag_head(nxt, duration_sec=jigsaw_settle_dur)
+                    jigsaw_in_count += 1
                 elif t_name == "pop_slam":
                     nxt = style_pop_slam_head(nxt, duration_sec=pop_dur if t_dur <= 0 else t_dur)
 

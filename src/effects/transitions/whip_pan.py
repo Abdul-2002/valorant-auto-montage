@@ -29,3 +29,30 @@ class PushTransition(TransitionEffect):
 
     def apply(self, clip_a: Any, clip_b: Any, duration: float, *, offset: float | None = None) -> Any:
         return concatenate_videoclips([clip_a, clip_b], method="compose")
+
+
+@register_transition("zoom_in")
+@dataclass
+class ZoomInTransition(TransitionEffect):
+    duration_sec: float = 0.16
+
+    def apply(self, clip_a: Any, clip_b: Any, duration: float, *, offset: float | None = None) -> Any:
+        return concatenate_videoclips([clip_a, clip_b], method="compose")
+
+
+@register_transition("zoom_out")
+@dataclass
+class ZoomOutTransition(TransitionEffect):
+    duration_sec: float = 0.16
+
+    def apply(self, clip_a: Any, clip_b: Any, duration: float, *, offset: float | None = None) -> Any:
+        return concatenate_videoclips([clip_a, clip_b], method="compose")
+
+
+@register_transition("zigzag")
+@dataclass
+class ZigzagTransition(TransitionEffect):
+    duration_sec: float = 0.16
+
+    def apply(self, clip_a: Any, clip_b: Any, duration: float, *, offset: float | None = None) -> Any:
+        return concatenate_videoclips([clip_a, clip_b], method="compose")

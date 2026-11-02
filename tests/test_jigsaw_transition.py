@@ -18,7 +18,11 @@ from src.effects.transitions.jigsaw import (
     piece_starts,
     style_jigsaw_tail,
 )
-from src.effects.transitions.motion_style import style_pop_slam_head
+from src.effects.transitions.motion_style import (
+    style_pop_slam_head,
+    style_zigzag_head,
+    style_zoom_settle_head,
+)
 from src.pipeline.jigsaw_assets import MAX_SEGMENTS, compose_piece_labels, gun_zone_segment, pick_scene_segments
 from src.pipeline.weapon_assets import weapon_mask_at
 
@@ -58,6 +62,18 @@ def test_pop_slam_head_preserves_shape() -> None:
     clip = _FakeClip([frame.copy() for _ in range(10)])
     styled = style_pop_slam_head(clip, duration_sec=0.15)
     assert styled._frames[0].shape == frame.shape
+
+
+def test_jigsaw_settle_stylers_preserve_shape() -> None:
+    frame = np.random.randint(0, 255, (90, 160, 3), dtype=np.uint8)
+    clip = _FakeClip([frame.copy() for _ in range(12)])
+    zoomed = style_zoom_settle_head(clip, duration_sec=0.18)
+    zig = style_zigzag_head(clip, duration_sec=0.18)
+    assert zoomed._frames[0].shape == frame.shape
+    assert zig._frames[0].shape == frame.shape
+    # Mid-window must differ from identity (effect actually fires).
+    assert not np.array_equal(zoomed._frames[1], frame)
+    assert not np.array_equal(zig._frames[1], frame)
 
 
 def test_should_put_gun_bottom_right_and_rest_centre_when_using_fixed_layout() -> None:
