@@ -130,7 +130,6 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
             enriched, _durations = enrich_events(highlights=events, video_paths=[Path(p) for p in meta["videos"]])
             creative_cfg = config.ai_director.creative_config.model_dump(mode="json")
             from src.pipeline.lyrics_align import analyze_lyric_events
-            from src.ai.play_labels import label_multi_kills
 
             lyric_events = tuple(
                 analyze_lyric_events(
@@ -141,11 +140,7 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
                     cache_dir=tdir / "song",
                 )
             )
-            play_labels = label_multi_kills(
-                enriched=enriched,
-                video_paths=[Path(p) for p in meta["videos"]],
-                api_key=str(getattr(config.ai_director.gemini, "api_key", "") or ""),
-            )
+            # Gemini play labels for selection run inside generate_montage_script (cached).
             brief = safe_generate_brief(
                 cfg=config.ai_director,
                 ctx=BriefContext(
@@ -153,7 +148,7 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
                     beat_map=beat_map,
                     creative_config_resolved=creative_cfg,
                     lyric_events=lyric_events,
-                    play_labels=play_labels or None,
+                    play_labels=None,
                 ),
             )
         except Exception:
@@ -167,6 +162,23 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
             brief=brief,
             persist_path=script_path,
         )
+
+    if (
+        music_src is not None
+        and str(getattr(config.output, "duration_mode", "fixed") or "fixed") == "clip_driven"
+        and getattr(script, "clips", None)
+    ):
+        span = max(float(c.output_end_sec or 0.0) for c in script.clips)
+        if span > 1.0:
+            try:
+                music_for_render, beat_map = prepare_edited_track(
+                    music_src,
+                    cache_dir=tdir / "song",
+                    needed_sec=span,
+                    splice=False,
+                )
+            except Exception:
+                pass
 
     w, h = (int(x) for x in str(config.output.resolution).lower().split("x"))
     script = attach_ghost_cutouts(
@@ -206,9 +218,10 @@ def _remember_sources(task_id: str, config: AppConfig, meta: dict[str, Any]) -> 
     try:
         from src.library.catalog import index_detect_task
 
-        api_key = str(config.ai_director.gemini.api_key or os.environ.get("GEMINI_API_KEY", ""))
+        # Do not Gemini-summarize multi‑GB VODs inline — that hung detect at
+        # phase=summarizing for tens of minutes and blocked SUCCESS / recommendations.
         model = str(config.ai_director.gemini.model or "gemini-2.5-flash-lite")
-        index_detect_task(task_id, list(meta.get("videos") or []), api_key=api_key, model=model)
+        index_detect_task(task_id, list(meta.get("videos") or []), api_key="", model=model)
     except Exception:
         log.exception("source library index failed for task %s", task_id)
 

@@ -10,10 +10,28 @@ async function readDetail(res: Response): Promise<string> {
 }
 
 export async function send<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  let res: Response;
+  try {
+    res = await fetch(path, init);
+  } catch {
+    throw new Error(
+      "Cannot reach montage API (Failed to fetch). Use http://localhost:3000 with `docker compose up -d` — not :5173."
+    );
+  }
   if (!res.ok) {
     const detail = await readDetail(res);
     throw new Error(detail || `Request failed (${res.status})`);
   }
   return (await res.json()) as T;
+}
+
+/** Quick check that /montage is proxied to a live API. */
+export async function pingApi(): Promise<boolean> {
+  try {
+    const res = await fetch("/montage/create", { method: "OPTIONS" });
+    // Any response from the proxy means the frontend server is up; 405/422 also fine.
+    return res.status > 0;
+  } catch {
+    return false;
+  }
 }

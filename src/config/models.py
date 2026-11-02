@@ -31,6 +31,9 @@ from src.config.effect_models import (  # noqa: F401  (re-exported for existing 
 
 class OutputConfig(BaseModel):
     target_duration_sec: int = Field(ge=5, le=60 * 30, default=90)
+    # fixed: pack/fill toward target_duration_sec.
+    # clip_driven: curate plays first; bed length = natural bar needs (target is a soft ceiling).
+    duration_mode: Literal["fixed", "clip_driven"] = "fixed"
     formats: list[Literal["16:9", "9:16"]] = Field(default_factory=lambda: ["16:9", "9:16"])
     resolution: str = Field(default="1920x1080")
     fps: int = Field(ge=24, le=240, default=60)
@@ -134,10 +137,10 @@ class ValorantYoloConfig(BaseModel):
 class AutoGamingYoloConfig(BaseModel):
     enabled: bool = True
     model_path: str = "models/auto_gaming_valorant.pt"
-    confidence_threshold: float = Field(ge=0.0, le=1.0, default=0.5)
+    confidence_threshold: float = Field(ge=0.0, le=1.0, default=0.35)
     region: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
-    sample_fps: int = Field(ge=1, le=60, default=3)
-    presence_conf: float = Field(ge=0.0, le=1.0, default=0.3)
+    sample_fps: int = Field(ge=1, le=60, default=5)
+    presence_conf: float = Field(ge=0.0, le=1.0, default=0.25)
     reemit_guard_sec: float = Field(ge=0.0, le=30.0, default=1.5)
     kill_dedupe_gap_sec: float = Field(ge=0.0, le=5.0, default=1.0)
     killfeed_latency_sec: float = Field(ge=0.0, le=2.0, default=0.1)
@@ -255,6 +258,10 @@ class AIDirectorConfig(BaseModel):
     enabled: bool = True
     provider: Literal["gemini", "openai_compatible", "local", "rule_only"] = "gemini"
     style_preset: str = "aggressive"
+    # standard: multis + strong/labeled singles; dense: multis + ace/clutch singles only.
+    curation_density: Literal["standard", "dense"] = "standard"
+    # Prefer sequence flow (pacing/arc/variety) over raw impact packing.
+    use_flow_scoring: bool = True
     creative_config: CreativeConfig = Field(default_factory=CreativeConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     openai_compatible: OpenAICompatibleConfig = Field(default_factory=OpenAICompatibleConfig)

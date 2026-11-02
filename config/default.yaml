@@ -269,10 +269,11 @@ detection:
   auto_gaming_yolo:
     enabled: true
     model_path: "models/auto_gaming_valorant.pt"
-    confidence_threshold: 0.5
+    # 0.5 missed weak killfeed rows (probe: kills at ~0.3–0.45 on some DVRs).
+    confidence_threshold: 0.35
     region: [0.0, 0.0, 1.0, 1.0]
-    sample_fps: 3
-    presence_conf: 0.3
+    sample_fps: 5
+    presence_conf: 0.25
     reemit_guard_sec: 1.5
     # Collapse kill-1/kill-2 flicker on the same frag.
     kill_dedupe_gap_sec: 1.0

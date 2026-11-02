@@ -22,12 +22,26 @@ function proxyApi(req, res) {
   }
   const lib = target.protocol === "https:" ? https : http;
   const headers = { ...req.headers, host: target.host };
-  const upstream = lib.request(target, { method: req.method, headers }, (proxied) => {
-    res.writeHead(proxied.statusCode || 502, proxied.headers);
-    proxied.pipe(res);
+  // Large VOD uploads need long timeouts (default Node sockets abort early).
+  const upstream = lib.request(
+    target,
+    { method: req.method, headers, timeout: 0 },
+    (proxied) => {
+      res.writeHead(proxied.statusCode || 502, proxied.headers);
+      proxied.pipe(res);
+    }
+  );
+  upstream.setTimeout(0);
+  upstream.on("timeout", () => {
+    upstream.destroy();
+    if (!res.headersSent) res.status(504).json({ detail: "Montage API timed out during upload/proxy" });
   });
-  upstream.on("error", () => {
-    if (!res.headersSent) res.status(502).json({ detail: "Montage API is not reachable" });
+  upstream.on("error", (err) => {
+    if (!res.headersSent) {
+      res.status(502).json({
+        detail: `Montage API is not reachable (${err && err.code ? err.code : "error"}). Is the api container up?`
+      });
+    }
   });
   req.pipe(upstream);
 }
@@ -238,7 +252,11 @@ if (fs.existsSync(distDir)) {
   });
 }
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   // eslint-disable-next-line no-console
-  console.log(`frontend listening on :${PORT}`);
+  console.log(`frontend listening on :${PORT} (API_PROXY_TARGET=${API_PROXY_TARGET})`);
 });
+// Multi-GB VOD multipart uploads.
+server.timeout = 0;
+server.headersTimeout = 0;
+server.requestTimeout = 0;

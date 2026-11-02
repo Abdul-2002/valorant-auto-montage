@@ -161,18 +161,39 @@ def jigsaw_tail_frame(
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
+def _match_hw(frame_b: np.ndarray, labels: np.ndarray, h: int, w: int) -> tuple[np.ndarray, np.ndarray]:
+    """Resize incoming frame + piece map to the outgoing frame size (mixed VOD resolutions)."""
+    if frame_b.shape[0] == h and frame_b.shape[1] == w and labels.shape == (h, w):
+        return frame_b, labels
+    resized_b = cv2.resize(frame_b, (w, h), interpolation=cv2.INTER_LINEAR)
+    resized_labels = cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
+    return resized_b, resized_labels
+
+
 def style_jigsaw_tail(clip: Any, *, incoming_frame: np.ndarray, labels: np.ndarray, beat_sec: float) -> Any:
     """Assemble the incoming clip's first frame, element by element, over the outgoing tail."""
     base_dur = float(getattr(clip, "duration", 0.0) or 0.0)
+    # Prefer MoviePy size when present so pieces match the outgoing canvas before first frame.
+    size = getattr(clip, "size", None)
+    if size and len(size) == 2:
+        tw, th = int(size[0]), int(size[1])
+        incoming_frame, labels = _match_hw(incoming_frame, labels, th, tw)
     pieces = build_pieces(incoming_frame, labels)
     rest_mask = labels == REST_LABEL
     starts = piece_starts(len(pieces) + 1, beat_sec if beat_sec > 0 else FALLBACK_BEAT_SEC, base_dur * 0.45)
     begin = base_dur + starts[0]
+    cache: dict[tuple[int, int], tuple[np.ndarray, list[Piece], np.ndarray]] = {}
 
     def transform(get_frame, t):
         frame = get_frame(t)
         if float(t) < begin:
             return frame
-        return jigsaw_tail_frame(frame, incoming_frame, pieces, rest_mask, float(t) - base_dur, starts)
+        h, w = frame.shape[:2]
+        key = (h, w)
+        if key not in cache:
+            fb, lab = _match_hw(incoming_frame, labels, h, w)
+            cache[key] = (fb, build_pieces(fb, lab), lab == REST_LABEL)
+        fb, pcs, rest = cache[key]
+        return jigsaw_tail_frame(frame, fb, pcs, rest, float(t) - base_dur, starts)
 
     return clip.transform(transform)

@@ -140,7 +140,9 @@ def build_upload_listing(
 
 
 def is_placeholder_title(title: str) -> bool:
-    return not title.strip() or bool(_PLACEHOLDER_TITLE.search(title))
+    # Only bare defaults like "Montage" / "Run 1" — not real titles that contain those words.
+    text = title.strip()
+    return not text or bool(re.fullmatch(r"(montage|run\s*\d+)", text, flags=re.IGNORECASE))
 
 
 def is_placeholder_description(description: str) -> bool:
@@ -194,8 +196,9 @@ def script_path_for_task(storage_dir: Path, task_id: str) -> Path:
     primary = storage_dir / "tasks" / task_id / "montage_script.json"
     if primary.is_file():
         return primary
-    # Local artifact runs (e.g. artifacts/run31) when STORAGE_DIR is ./data
-    artifact = storage_dir.parent / "artifacts" / task_id / "montage_script.json"
-    if artifact.is_file():
-        return artifact
+    # Local runs (outputs/run1, legacy artifacts/) when STORAGE_DIR is ./data
+    for folder in ("outputs", "artifacts"):
+        candidate = storage_dir.parent / folder / task_id / "montage_script.json"
+        if candidate.is_file():
+            return candidate
     return primary

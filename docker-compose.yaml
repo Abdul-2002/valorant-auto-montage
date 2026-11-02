@@ -1,23 +1,21 @@
+# Full Lost SI pipeline (default):
+#   docker compose up -d --build
+#
+# Starts: redis + api + worker + frontend + flower
+#
+# GPU override (optional):
+#   docker compose -f docker-compose.yaml -f docker-compose.gpu.yaml up -d --build
+#
 services:
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-
-  frontend:
-    # React + Node UI:
-    # - today: live logs viewer for api/worker/redis
-    # - later: montage editor UI
-    build:
-      context: ./frontend
-    ports:
-      - "3000:3000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      # Only show containers for this project.
-      - CONTAINER_NAME_PREFIX=valorant-montage-bot-
-      - API_PROXY_TARGET=http://api:8000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   api:
@@ -28,25 +26,37 @@ services:
       - REDIS_BROKER_URL=redis://redis:6379/0
       - REDIS_BACKEND_URL=redis://redis:6379/1
       - STORAGE_DIR=/data
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MONTAGE_CONFIG_PATH=/app/config/default.yaml
+      - YOUTUBE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
       - ./models:/app/models
+      - ./config:/app/config:ro
+      - ./songs:/songs:ro
+      - ./videos:/videos:ro
+      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
-      - redis
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    restart: unless-stopped
 
   worker:
+    # Celery: detect highlights + render montages (required for AI Montage Maker)
     build:
       context: .
       dockerfile: Dockerfile
@@ -54,22 +64,52 @@ services:
       - REDIS_BROKER_URL=redis://redis:6379/0
       - REDIS_BACKEND_URL=redis://redis:6379/1
       - STORAGE_DIR=/data
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    command: ["celery", "-A", "src.worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MONTAGE_CONFIG_PATH=/app/config/default.yaml
+      - YOUTUBE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
+    command:
+      [
+        "celery",
+        "-A",
+        "src.worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=1",
+      ]
     volumes:
       - ./data:/data
       - ./models:/app/models
+      - ./config:/app/config:ro
+      - ./songs:/songs:ro
+      - ./videos:/videos:ro
+      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
-      - redis
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    # Lost SI Studio — Upload / AI Montage Maker / editor / logs
+    # Proxies /montage and /youtube → api:8000
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONTAINER_NAME_PREFIX=valorant-montage-bot-
+      - API_PROXY_TARGET=http://api:8000
+      - PORT=3000
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    restart: unless-stopped
 
   flower:
     build:
@@ -78,8 +118,17 @@ services:
     environment:
       - REDIS_BROKER_URL=redis://redis:6379/0
       - REDIS_BACKEND_URL=redis://redis:6379/1
-    command: ["celery", "-A", "src.worker.celery_app:celery_app", "flower", "--port=5555"]
+    command:
+      [
+        "celery",
+        "-A",
+        "src.worker.celery_app:celery_app",
+        "flower",
+        "--port=5555",
+      ]
     ports:
       - "5555:5555"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
