@@ -1,36 +1,61 @@
-## Valorant Montage Bot
+# Valorant Montage Bot (Lost SI)
 
-FastAPI + Celery (Redis) service that turns raw Valorant gameplay (4–5 minute videos, 1–10+ inputs) into beat-synced montage outputs (16:9 + 9:16).
+FastAPI + Celery + Redis pipeline that turns Valorant VODs into beat-synced montages (16:9 and 9:16), with a Vite studio UI for upload, detect, select, edit, and render.
 
-### What it does
+## Stack
 
-- **Detect highlights (hybrid)**: kill-feed (template matching) + audio percussive peaks (HPSS+RMS)
-- **Review/edit highlights** via API before rendering
-- **Assemble montage**: beat-synced cuts, velocity edits, zoom, shake, color grading, transitions, audio mixing
-- **Extensible**: effects, transitions, detectors are plugins discovered at runtime (registry + decorators)
+- **API** — FastAPI (`src/app`)
+- **Worker** — Celery detect + render (`src/worker`)
+- **AI director** — play grouping, flow scoring, compose (`src/ai`)
+- **Studio** — React/Vite frontend (`frontend/`)
+- **Optional** — YouTube upload (`src/youtube`)
 
-### Local run (dev)
+## Requirements
 
-This project is designed to run with:
-- `ffmpeg` installed (NVENC optional but recommended)
-- Redis (for Celery broker/backend)
+- Docker + Docker Compose
+- NVIDIA GPU optional (NVENC / CUDA if available)
+- Place YOLO / detector weights under `models/` (see config)
 
-You’ll typically run with Docker Compose (see `docker-compose.yaml`) once implemented.
+## Quick start
 
-### UIs
+```bash
+cp .env.example .env
+# set GEMINI_API_KEY if you use Gemini features
+# set YOUTUBE_OAUTH_* if you use YouTube upload
 
-- API docs: `http://localhost:8000/docs`
-- Celery Flower: `http://localhost:5555`
-- Frontend UI (logs now, editor later): `http://localhost:3000`
+docker compose up -d --build
+```
 
-Note: the frontend mounts the Docker socket read-only so it can read container logs.
+| Service | URL |
+|--|--|
+| Studio | http://localhost:3000 |
+| API docs | http://localhost:8000/docs |
+| Flower | http://localhost:5555 |
 
-### Templates
+Put source clips in `videos/` and songs in `songs/` (or upload via the studio). Outputs land under `data/tasks/<id>/outputs/`.
 
-Kill-feed detection requires template PNGs in `assets/templates/`:
-- `kill_skull.png`
-- `headshot_skull.png`
-- `death_skull.png`
-- `assist_icon.png`
+## YouTube OAuth (optional)
 
-Capture them from your own Valorant footage at native resolution with transparency when possible.
+1. Create a **Web application** OAuth client in Google Cloud.
+2. Authorized redirect URI: `http://127.0.0.1:8000/youtube/callback`
+3. Either set `YOUTUBE_OAUTH_CLIENT_ID` / `YOUTUBE_OAUTH_CLIENT_SECRET` in `.env`, **or** place a `client_secret*.json` in the project root (gitignored).
+4. Open http://127.0.0.1:8000/youtube/connect and approve access.
+
+## Layout
+
+```
+src/           backend + AI + pipeline + YouTube
+frontend/      Lost SI Studio
+config/        default.yaml and presets
+tests/         pytest suite
+assets/        templates / static assets
+videos/        local VOD inputs (gitignored media)
+songs/         local music (gitignored media)
+data/          runtime task storage (gitignored)
+```
+
+## Dev notes
+
+- Never commit `.env`, `client_secret*.json`, media, or model weights.
+- Config: `config/default.yaml` (override with `MONTAGE_CONFIG_PATH`).
+- Tests: `pytest` from the repo root (or inside the API image).
