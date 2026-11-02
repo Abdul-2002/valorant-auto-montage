@@ -1,11 +1,7 @@
-# Full Lost SI pipeline (default):
+# Lost SI montage stack:
 #   docker compose up -d --build
 #
-# Starts: redis + api + worker + frontend + flower
-#
-# GPU override (optional):
-#   docker compose -f docker-compose.yaml -f docker-compose.gpu.yaml up -d --build
-#
+# Services: redis + api + worker + frontend + flower
 services:
   redis:
     image: redis:7-alpine
@@ -28,7 +24,9 @@ services:
       - STORAGE_DIR=/data
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MONTAGE_CONFIG_PATH=/app/config/default.yaml
-      - YOUTUBE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
+      - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID:-}
+      - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET:-}
+      - YOUTUBE_OAUTH_REDIRECT_URI=${YOUTUBE_OAUTH_REDIRECT_URI:-http://127.0.0.1:8000/youtube/callback}
     ports:
       - "8000:8000"
     volumes:
@@ -37,7 +35,6 @@ services:
       - ./config:/app/config:ro
       - ./songs:/songs:ro
       - ./videos:/videos:ro
-      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -56,7 +53,6 @@ services:
     restart: unless-stopped
 
   worker:
-    # Celery: detect highlights + render montages (required for AI Montage Maker)
     build:
       context: .
       dockerfile: Dockerfile
@@ -66,7 +62,9 @@ services:
       - STORAGE_DIR=/data
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MONTAGE_CONFIG_PATH=/app/config/default.yaml
-      - YOUTUBE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
+      - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID:-}
+      - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET:-}
+      - YOUTUBE_OAUTH_REDIRECT_URI=${YOUTUBE_OAUTH_REDIRECT_URI:-http://127.0.0.1:8000/youtube/callback}
     command:
       [
         "celery",
@@ -82,7 +80,6 @@ services:
       - ./config:/app/config:ro
       - ./songs:/songs:ro
       - ./videos:/videos:ro
-      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -91,8 +88,6 @@ services:
     restart: unless-stopped
 
   frontend:
-    # Lost SI Studio — Upload / AI Montage Maker / editor / logs
-    # Proxies /montage and /youtube → api:8000
     build:
       context: ./frontend
       dockerfile: Dockerfile
