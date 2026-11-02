@@ -45,10 +45,19 @@ def _close_quietly(obj: Any) -> None:
 def _make_clip(video_path: Path, clip: SelectedClip, pool: DecoderPool) -> VideoFileClip:
     base = VideoFileClip(str(video_path))
     pool.track(base.reader)
+    # Clamp to source duration — float equality at VOD end trips MoviePy's subclipped check.
+    src_dur = float(getattr(base, "duration", 0.0) or 0.0)
+    end = float(clip.end_sec)
+    start = float(clip.start_sec)
+    if src_dur > 0.0:
+        end = min(end, src_dur)
+        if end >= src_dur:
+            end = max(0.0, src_dur - 1e-3)
+        start = max(0.0, min(start, max(0.0, end - 1e-3)))
     # MoviePy v2 renamed `subclip` -> `subclipped`.
     if hasattr(base, "subclip"):
-        return base.subclip(clip.start_sec, clip.end_sec)  # type: ignore[attr-defined]
-    return base.subclipped(clip.start_sec, clip.end_sec)  # type: ignore[attr-defined]
+        return base.subclip(start, end)  # type: ignore[attr-defined]
+    return base.subclipped(start, end)  # type: ignore[attr-defined]
 
 
 def _resized(clip: VideoFileClip, *, w: int, h: int) -> VideoFileClip:

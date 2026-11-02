@@ -45,7 +45,7 @@ def main() -> int:
         help="One or more gameplay video paths (multi-VOD montages supported)",
     )
     p.add_argument("--music", required=True, type=Path, help="Music track path")
-    p.add_argument("--out", type=Path, default=ROOT / "artifacts/local_pipeline_run", help="Output directory")
+    p.add_argument("--out", type=Path, default=ROOT / "outputs/local_pipeline_run", help="Output directory")
     p.add_argument("--config", type=Path, default=ROOT / "config/default.yaml")
     p.add_argument("--highlights", type=Path, default=None, help="Reuse an existing highlights.json and skip detection")
     p.add_argument("--script", type=Path, default=None, help="Reuse an existing montage_script.json and skip brief/compose/asset steps")
@@ -85,17 +85,19 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    duration_mode = str(getattr(config.output, "duration_mode", "fixed") or "fixed")
     print("Phase: music edit + beat analysis...", flush=True)
     music_for_render, beat_map = prepare_edited_track(
         music,
         cache_dir=out / "song",
+        # clip_driven: target_duration_sec is a soft ceiling until compose sets the real bed.
         needed_sec=float(config.output.target_duration_sec),
-        # Intro → hooks/chorus body → real ending (needs all-in-one-infer structure).
-        splice=True,
+        # Contiguous bed only — splice teleports read as song distortion.
+        splice=False,
     )
     print(
         f"  -> tempo ~{getattr(beat_map, 'tempo_bpm', None)} bpm, track={music_for_render.name}, "
-        f"downbeats={len(getattr(beat_map, 'downbeat_times', []) or [])}",
+        f"downbeats={len(getattr(beat_map, 'downbeat_times', []) or [])}, mode={duration_mode}",
         flush=True,
     )
 
@@ -116,18 +118,7 @@ def main() -> int:
                     cache_dir=out / "song",
                 )
             )
-            play_labels: dict[int, str] = {}
-            try:
-                from src.ai.play_labels import label_multi_kills
-
-                play_labels = label_multi_kills(
-                    enriched=enriched,
-                    video_paths=videos,
-                    api_key=str(getattr(config.ai_director.gemini, "api_key", "") or ""),
-                    model=str(getattr(config.ai_director.gemini, "model", "gemini-2.5-flash-lite") or "gemini-2.5-flash"),
-                )
-            except Exception as exc:
-                print(f"Play labels skipped: {exc}", flush=True)
+            # Play labels for selection run inside generate_montage_script (cached).
             brief = safe_generate_brief(
                 cfg=config.ai_director,
                 ctx=BriefContext(
@@ -135,7 +126,7 @@ def main() -> int:
                     beat_map=beat_map,
                     creative_config_resolved=creative_cfg,
                     lyric_events=lyric_events,
-                    play_labels=play_labels or None,
+                    play_labels=None,
                 ),
             )
         except Exception as exc:
@@ -186,6 +177,26 @@ def main() -> int:
             sam_model_path=ROOT / config.detection.sam_model_path,
         )
         script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
+
+    # Clip-driven: re-cut contiguous HandClap to the composed span so music matches the edit.
+    if duration_mode == "clip_driven" and script.clips:
+        starts = [float(c.output_start_sec or 0.0) for c in script.clips if c.output_start_sec is not None]
+        ends = [float(c.output_end_sec or 0.0) for c in script.clips if c.output_end_sec is not None]
+        # Need audio through the last output_end so phase-trim (drop leading to first start) still works.
+        span = max(ends) if ends else 0.0
+        assembled = (max(ends) - min(starts)) if starts and ends else span
+        if span > 1.0:
+            print(
+                f"Phase: re-cut music bed to {span:.1f}s "
+                f"(assembled ~{assembled:.1f}s, phase={min(starts) if starts else 0:.1f}s)...",
+                flush=True,
+            )
+            music_for_render, beat_map = prepare_edited_track(
+                music,
+                cache_dir=out / "song",
+                needed_sec=span,
+                splice=False,
+            )
 
     render_out = out / "outputs"
     render_out.mkdir(parents=True, exist_ok=True)

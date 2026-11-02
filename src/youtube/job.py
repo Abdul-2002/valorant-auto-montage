@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -12,6 +15,8 @@ from src.youtube.settings import oauth_settings
 from src.youtube.store import claim_upload, finish_upload, get_channel, get_upload, require_upload_scope
 from src.youtube.upload import start_resumable, upload_file
 
+log = logging.getLogger(__name__)
+
 
 def run_upload(
     upload_id: str,
@@ -21,7 +26,10 @@ def run_upload(
 ) -> dict[str, str]:
     conn = connect(db_path or library_db_path())
     owns_client = client is None
-    http = client or httpx.Client(timeout=httpx.Timeout(30.0, read=600.0))
+    # Long write timeout + chunk retries; stage off OneDrive before PUT.
+    http = client or httpx.Client(
+        timeout=httpx.Timeout(connect=30.0, read=600.0, write=120.0, pool=30.0)
+    )
     claimed = False
     try:
         existing = _already_uploaded(conn, upload_id)
@@ -84,9 +92,29 @@ def _send(conn: sqlite3.Connection, http: httpx.Client, upload_id: str) -> dict[
     path = Path(str(row["source_path"]))
     if not path.is_file():
         raise YouTubeUploadError("montage file is missing")
-    session = start_resumable(http, access_token=access, meta=_meta(row), size_bytes=path.stat().st_size)
-    accepted = upload_file(http, session_uri=session, path=path, access_token=access)
-    return _record(conn, upload_id, str(row["channel_id"]), accepted)
+    staged = _stage_local_copy(path, upload_id=upload_id)
+    try:
+        session = start_resumable(
+            http,
+            access_token=access,
+            meta=_meta(row),
+            size_bytes=staged.stat().st_size,
+        )
+        accepted = upload_file(http, session_uri=session, path=staged, access_token=access)
+        return _record(conn, upload_id, str(row["channel_id"]), accepted)
+    finally:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _stage_local_copy(path: Path, *, upload_id: str) -> Path:
+    """Copy montage onto container-local disk so PUT isn't blocked by OneDrive I/O."""
+    dest = Path(tempfile.gettempdir()) / f"yt_upload_{upload_id}.mp4"
+    log.info("youtube: staging %s -> %s", path, dest)
+    shutil.copy2(path, dest)
+    return dest
 
 
 def _require_selected_channel(http: httpx.Client, access: str, channel_id: str) -> None:

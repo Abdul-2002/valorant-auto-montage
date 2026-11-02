@@ -50,13 +50,18 @@ def bars_needed(demand: ClipDemand, beat_interval: float) -> int:
     return max(2, math.ceil((PRE_BEATS_TARGET + 1 + internal + POST_BEATS_MIN) / BEATS_PER_BAR))
 
 
-# Slightly denser than 2.5 so more kill bursts fit before the bed ends.
-TARGET_AVG_BARS = 2.0
-
-
 def estimate_montage_seconds(demands: Sequence[ClipDemand], *, beat_interval: float) -> float:
-    """Song length the clips want: each clip at least its needed bars, ~2.5 bars on average."""
-    bars = sum(max(float(bars_needed(d, beat_interval)), TARGET_AVG_BARS) for d in demands)
+    """Song length the clips need under the same bar rules as ``allocate_bars``.
+
+    Uses ``bars_needed`` / fixed bars and the default section floor so the bed is
+    not shorter than the layout (which would drop the finale).
+    """
+    bars = 0.0
+    for d in demands:
+        if d.fixed_bars is not None:
+            bars += max(1, int(d.fixed_bars))
+        else:
+            bars += max(float(bars_needed(d, beat_interval)), float(DEFAULT_BARS))
     return bars * BEATS_PER_BAR * beat_interval
 
 
@@ -85,6 +90,7 @@ def _grow(allocs: list[int], labels: list[str], spare: int, frozen: Sequence[boo
     """Give leftover bars to the finale first, then calm-section clips, then everyone.
 
     Frozen clips keep the length they were given (a kill-only punch, a 4–5s hold).
+    Spare beyond normal caps is left unused — song follows the clips, not the reverse.
     """
     last = len(allocs) - 1
     while spare > 0 and not frozen[last] and allocs[last] < FINALE_MAX_BARS:
@@ -178,9 +184,17 @@ def _origin_bar(
 
 
 def plan_on_bars(
-    *, beat_map: BeatMap, demands: Sequence[ClipDemand], song_end_sec: float
+    *,
+    beat_map: BeatMap,
+    demands: Sequence[ClipDemand],
+    song_end_sec: float,
+    start_at_zero: bool = False,
 ) -> list[ClipBeatPlan]:
-    """One plan per demand; kills on the strongest beats inside each clip's bars."""
+    """One plan per demand; kills on the strongest beats inside each clip's bars.
+
+    ``start_at_zero``: pack from the first bar (clip-driven contiguous prefix).
+    Otherwise may slide the block so the heaviest body run opens on the first chorus.
+    """
     grid = build_grid(beat_map, song_end_sec)
     bars = _bar_beat_indices(grid, beat_map.downbeat_times)
     if len(bars) < 3:
@@ -188,10 +202,9 @@ def plan_on_bars(
     bar_times = [grid.beats[i] for i in bars]
     allocs = allocate_bars(demands, bar_times=bar_times, beat_map=beat_map, beat_interval=grid.interval)
     plans: list[ClipBeatPlan] = []
-    pos = _origin_bar(allocs, demands, bar_times, beat_map)
+    pos = 0 if start_at_zero else _origin_bar(allocs, demands, bar_times, beat_map)
     for i, (demand, n_bars) in enumerate(zip(demands, allocs)):
         cut = bars[pos]
-        is_last = i == len(demands) - 1
         end_pos = min(pos + n_bars, len(bars) - 1)
         if demand.pre_beats is not None:
             pre_lo = pre_hi = max(0, int(demand.pre_beats))
@@ -202,8 +215,7 @@ def plan_on_bars(
         for gap in demand.src_kill_gaps:
             kills.append(next_kill_beat(grid, kills[-1], float(gap)))
         allocated_end = float(grid.beats[bars[end_pos]])
-        # Only a clip that already reaches the last bar runs out to the song end.
-        end_t = float(song_end_sec) if is_last and end_pos >= len(bars) - 1 else min(float(song_end_sec), allocated_end)
+        end_t = min(float(song_end_sec), allocated_end)
         if kills[-1] + POST_BEATS_MIN >= len(grid.beats) or grid.beats[kills[-1]] >= end_t:
             logger.warning("bar_layout: clip %d does not fit before the song end; stopping", i)
             break

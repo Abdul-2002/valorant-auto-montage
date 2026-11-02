@@ -71,7 +71,11 @@ def _scoped_flags(highlights: list[DetectedEvent], video_paths: list[Path]) -> d
 
 
 def enrich_events(
-    *, highlights: list[DetectedEvent], video_paths: list[Path], detect_scope: bool = True
+    *,
+    highlights: list[DetectedEvent],
+    video_paths: list[Path],
+    detect_scope: bool = True,
+    probe_videos: bool = True,
 ) -> tuple[list[EnrichedEvent], list[float]]:
     """
     Enrich events with per-video duration/fps, neighbor gaps and local CV features.
@@ -79,10 +83,14 @@ def enrich_events(
     """
     durations: list[float] = []
     fps_by_video: list[float] = []
-    for p in video_paths:
-        info = get_video_info(p)
-        durations.append(float(info.duration_sec))
-        fps_by_video.append(float(info.fps or 60.0))
+    if probe_videos:
+        for p in video_paths:
+            info = get_video_info(p)
+            durations.append(float(info.duration_sec))
+            fps_by_video.append(float(info.fps or 60.0))
+    else:
+        durations = [0.0] * len(video_paths)
+        fps_by_video = [60.0] * len(video_paths)
 
     # gaps based on time-order within each video
     by_video: dict[int, list[tuple[int, DetectedEvent]]] = {}

@@ -36,7 +36,8 @@ def test_should_keep_a_weak_single_at_one_bar_and_not_stretch_the_finale() -> No
     assert abs(plans[0].duration_sec - 2.0) < 1e-6
     assert abs(plans[0].kill_output_sec[0] - plans[0].output_start_sec - 1.0) < 1e-6
     assert abs(plans[1].duration_sec - 6.0) < 1e-6
-    assert plans[2].duration_sec <= 12.0
+    # Finale may grow up to FINALE_MAX_BARS (8 × 2s) but must not absorb the whole bed.
+    assert plans[2].duration_sec <= 16.0
     assert plans[2].output_end_sec < 40.0
 
 

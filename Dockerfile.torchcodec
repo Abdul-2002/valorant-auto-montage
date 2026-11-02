@@ -6,6 +6,8 @@
 # all-in-one-infer: labeled intro/verse/chorus/outro for music_edit splices.
 FROM valorant-montage-bot-render:latest
 
-# torchcodec 0.17.0 is already on the base image; reinstall trips intermittent
-# PyPI hash mismatches under WSL. Only layer the structure analyzer here.
-RUN pip install --no-cache-dir "all-in-one-infer==3.1.0"
+# torchcodec: torchaudio>=2.9 demucs save path needs it. Prefer existing wheel;
+# reinstall only if import fails (avoids intermittent PyPI hash mismatches).
+RUN pip install --no-cache-dir "all-in-one-infer==3.1.0" \
+ && python -c "import torchcodec" 2>/dev/null \
+ || pip install --no-cache-dir --force-reinstall "torchcodec==0.17.0"

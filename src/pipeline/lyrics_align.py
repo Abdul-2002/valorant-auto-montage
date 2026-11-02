@@ -88,8 +88,13 @@ def _separate_vocals(audio_path: Path, cache_dir: Path) -> Path | None:
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         detail = ""
         if isinstance(exc, subprocess.CalledProcessError):
-            detail = (exc.stderr or exc.stdout or "")[-400:]
-        log.warning("lyrics_align: demucs failed (%s)%s; using full mix for ASR", exc, f" :: {detail}" if detail else "")
+            err = (exc.stderr or exc.stdout or "")
+            if "TorchCodec" in err or "torchcodec" in err:
+                detail = "torchaudio needs torchcodec for demucs save"
+            else:
+                # One line only — demucs dumps full Python tracebacks into stderr.
+                detail = next((ln.strip() for ln in err.splitlines() if ln.strip()), "")[:160]
+        log.warning("lyrics_align: demucs failed (%s)%s; using full mix for ASR", type(exc).__name__, f": {detail}" if detail else "")
         return None
     if expected.is_file():
         return expected

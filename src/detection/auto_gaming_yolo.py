@@ -72,13 +72,13 @@ class AutoGamingYoloDetector(Detector):
     """
 
     model_path: str = "models/auto_gaming_valorant.pt"
-    confidence_threshold: float = 0.5
+    confidence_threshold: float = 0.35
     region: tuple[float, float, float, float] = field(default_factory=lambda: (0.0, 0.0, 1.0, 1.0))
-    sample_fps: int = 3
+    sample_fps: int = 5
     # Presence hysteresis: a class counts as "already on screen" above this
     # (lower) confidence, suppressing re-emissions from conf flicker around
     # the emission threshold.
-    presence_conf: float = 0.3
+    presence_conf: float = 0.25
     # Minimum gap before ANY kill class may fire again (cross-class).
     reemit_guard_sec: float = 1.5
     # Merge remaining near-duplicates after refine (kill-1/kill-2 flicker).
@@ -122,8 +122,16 @@ class AutoGamingYoloDetector(Detector):
         """Return {raw_class: (conf, bbox)} for kill classes above presence_conf."""
         infer_frame, off_x, off_y = self._crop_region(frame)
         conf_floor = min(float(self.presence_conf), float(self.confidence_threshold))
+        # half=True on CPU is deprecated and can silently degrade Ultralytics predicts.
+        use_half = False
         try:
-            results = model.predict(infer_frame, conf=conf_floor, verbose=False, half=True)
+            import torch
+
+            use_half = bool(torch.cuda.is_available())
+        except Exception:
+            use_half = False
+        try:
+            results = model.predict(infer_frame, conf=conf_floor, verbose=False, half=use_half)
         except TypeError:
             results = model.predict(infer_frame, conf=conf_floor, verbose=False)
 

@@ -50,8 +50,12 @@ def contiguous_bed_duration(
 
     Ending mid-chorus with a fade reads as a weak cut. Prefer the end of the
     last chorus/drop that started before the target (extend slightly if needed).
+    When ``needed_sec`` covers the whole track, keep the full song through ``end``.
     """
     target = float(needed_sec)
+    song_end = float(structure.segments[-1].end_sec) if structure.segments else target
+    if target >= song_end - 1.0:
+        return song_end
     ends = [
         float(s.end_sec)
         for s in structure.segments

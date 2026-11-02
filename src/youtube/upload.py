@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import re
+import time
 from pathlib import Path
 
 import httpx
@@ -8,8 +10,12 @@ import httpx
 from src.youtube.errors import YouTubeUploadError
 from src.youtube.metadata import video_body
 
+log = logging.getLogger(__name__)
+
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
-_CHUNK = 8 * 1024 * 1024
+# Smaller chunks recover faster after a stalled PUT on flaky Docker/WSL links.
+_CHUNK = 2 * 1024 * 1024
+_CHUNK_TRANSPORT_RETRIES = 5
 
 
 def start_resumable(
@@ -58,7 +64,9 @@ def upload_file(
         while offset < total:
             handle.seek(offset)
             blob = handle.read(chunk_size)
-            response = _put_chunk(client, session_uri, blob, offset, total, access_token)
+            response = _put_chunk_with_retry(
+                client, session_uri, blob, offset, total, access_token
+            )
             if response.status_code in (200, 201):
                 return _accepted(response)
             if response.status_code == 308:
@@ -82,6 +90,42 @@ def resume_offset(response: httpx.Response, *, fallback: int) -> int:
     return int(match.group(1)) + 1
 
 
+def _put_chunk_with_retry(
+    client: httpx.Client,
+    session_uri: str,
+    blob: bytes,
+    start: int,
+    total: int,
+    access_token: str,
+) -> httpx.Response:
+    last_exc: httpx.HTTPError | None = None
+    for attempt in range(1, _CHUNK_TRANSPORT_RETRIES + 1):
+        try:
+            return _put_chunk(client, session_uri, blob, start, total, access_token)
+        except httpx.TimeoutException as exc:
+            last_exc = exc
+            log.warning(
+                "youtube chunk timeout at byte %s (attempt %s/%s): %s",
+                start,
+                attempt,
+                _CHUNK_TRANSPORT_RETRIES,
+                type(exc).__name__,
+            )
+            time.sleep(min(2 ** (attempt - 1), 16))
+        except httpx.TransportError as exc:
+            last_exc = exc
+            log.warning(
+                "youtube chunk transport error at byte %s (attempt %s/%s): %s",
+                start,
+                attempt,
+                _CHUNK_TRANSPORT_RETRIES,
+                type(exc).__name__,
+            )
+            time.sleep(min(2 ** (attempt - 1), 16))
+    name = type(last_exc).__name__ if last_exc is not None else "HTTPError"
+    raise YouTubeUploadError(f"upload connection failed ({name})") from None
+
+
 def _put_chunk(
     client: httpx.Client,
     session_uri: str,
@@ -91,19 +135,16 @@ def _put_chunk(
     access_token: str,
 ) -> httpx.Response:
     end = start + len(blob) - 1
-    try:
-        return client.put(
-            session_uri,
-            content=blob,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Length": str(len(blob)),
-                "Content-Type": "video/mp4",
-                "Content-Range": f"bytes {start}-{end}/{total}",
-            },
-        )
-    except httpx.HTTPError as exc:
-        raise YouTubeUploadError(f"upload connection failed ({type(exc).__name__})") from None
+    return client.put(
+        session_uri,
+        content=blob,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Length": str(len(blob)),
+            "Content-Type": "video/mp4",
+            "Content-Range": f"bytes {start}-{end}/{total}",
+        },
+    )
 
 
 def _accepted(response: httpx.Response) -> dict[str, str]:
