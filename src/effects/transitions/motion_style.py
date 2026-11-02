@@ -113,3 +113,55 @@ def style_pop_slam_head(clip: Any, *, duration_sec: float) -> Any:
         return cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
 
     return clip.transform(transform)
+
+
+def style_zoom_settle_head(clip: Any, *, duration_sec: float, start_zoom: float = 1.22) -> Any:
+    """After a jigsaw assembles: incoming clip starts punched in, eases to 1.0.
+
+    Layered on top of jigsaw — does not replace the piece reveal.
+    """
+    base_dur = float(getattr(clip, "duration", 0.0) or 0.0)
+    d = min(max(0.06, float(duration_sec)), max(0.06, base_dur * 0.4))
+    z0 = max(1.05, float(start_zoom))
+
+    def transform(get_frame, t):
+        frame = get_frame(t)
+        if float(t) >= d:
+            return frame
+        u = float(t) / d
+        z = z0 - (z0 - 1.0) * (1.0 - (1.0 - u) ** 2)
+        h, w = frame.shape[:2]
+        nh, nw = max(1, int(round(h / z))), max(1, int(round(w / z)))
+        y0, x0 = max(0, (h - nh) // 2), max(0, (w - nw) // 2)
+        crop = frame[y0 : y0 + nh, x0 : x0 + nw]
+        return cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return clip.transform(transform)
+
+
+def style_zigzag_head(clip: Any, *, duration_sec: float) -> Any:
+    """Diagonal slash wipe settle on the incoming head (Rafi-style motion accent)."""
+    base_dur = float(getattr(clip, "duration", 0.0) or 0.0)
+    d = min(max(0.06, float(duration_sec)), max(0.06, base_dur * 0.4))
+
+    def transform(get_frame, t):
+        frame = get_frame(t)
+        if float(t) >= d:
+            return frame
+        u = float(t) / d
+        # Reveal from top-left → bottom-right with a soft diagonal band.
+        h, w = frame.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        # Progress threshold moves across the diagonal; band softens the edge.
+        prog = (xx / max(1, w - 1) + yy / max(1, h - 1)) * 0.5
+        edge = float(u)
+        band = 0.12
+        alpha = np.clip((prog - (edge - band)) / band, 0.0, 1.0)[..., None]
+        # Hidden side: slight zoomed crop so the wipe feels like a push-in.
+        z = 1.12 - 0.12 * u
+        nh, nw = max(1, int(round(h / z))), max(1, int(round(w / z)))
+        y0, x0 = max(0, (h - nh) // 2), max(0, (w - nw) // 2)
+        punched = cv2.resize(frame[y0 : y0 + nh, x0 : x0 + nw], (w, h), interpolation=cv2.INTER_LINEAR)
+        return (punched * (1.0 - alpha) + frame.astype(np.float32) * alpha).astype(frame.dtype)
+
+    return clip.transform(transform)

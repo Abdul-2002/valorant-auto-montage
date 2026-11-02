@@ -49,6 +49,7 @@ frontend/      Lost SI Studio
 config/        default.yaml and presets
 tests/         pytest suite
 assets/        templates / static assets
+docs/          studio notes
 videos/        local VOD inputs (gitignored media)
 songs/         local music (gitignored media)
 data/          runtime task storage (gitignored)
