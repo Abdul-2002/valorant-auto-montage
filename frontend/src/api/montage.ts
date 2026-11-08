@@ -1,5 +1,5 @@
 import { send } from "./http";
-import type { Highlight, Layout, MontageScript, Recommendations } from "./types";
+import type { Highlight, Layout, MontageScript, Recommendations, TaskListResponse, TaskStatus } from "./types";
 import { uploadApiBase } from "./uploadBase";
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -111,8 +111,12 @@ export async function createMontage(
   return created;
 }
 
-export function getStatus(taskId: string) {
-  return send<import("./types").TaskStatus>(`/montage/${encodeURIComponent(taskId)}/status`);
+export function listTasks(): Promise<TaskListResponse> {
+  return send("/montage/tasks");
+}
+
+export function getStatus(taskId: string): Promise<TaskStatus> {
+  return send(`/montage/${encodeURIComponent(taskId)}/status`);
 }
 
 export function getHighlights(taskId: string): Promise<{ highlights: Highlight[] }> {
@@ -159,13 +163,21 @@ export function getScript(taskId: string): Promise<{ task_id: string; script: Mo
   return send(`/montage/${encodeURIComponent(taskId)}/script`);
 }
 
-export function saveScriptAndRender(
+export function saveScript(
   taskId: string,
-  script: MontageScript
-): Promise<{ task_id: string; render_task_id: string }> {
+  script: MontageScript,
+  render = false
+): Promise<{ task_id: string; saved: boolean; render_task_id: string | null }> {
   return send(`/montage/${encodeURIComponent(taskId)}/script`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ script }),
+    body: JSON.stringify({ script, render }),
   });
+}
+
+export function saveScriptAndRender(
+  taskId: string,
+  script: MontageScript
+): Promise<{ task_id: string; saved: boolean; render_task_id: string | null }> {
+  return saveScript(taskId, script, true);
 }

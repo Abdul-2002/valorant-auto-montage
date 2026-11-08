@@ -28,8 +28,17 @@ MAX_SEGMENTS = 3
 # The gun and its arms land as one piece, so big skins count (Phantom close-up ~12%).
 JIGSAW_GUN_AREA_RANGE = (0.01, 0.16)
 _GUN_ZONE_MIN_IN_BOX = 0.8
-# Left/right walls and the upper centre; y=0.25 clears the HUD score bar.
-_ELEMENT_POINTS_FRAC = ((0.08, 0.5), (0.92, 0.5), (0.5, 0.25))
+# Dense scene prompts: walls, floor, upper centre (clears HUD), mid-depth props.
+_ELEMENT_POINTS_FRAC = (
+    (0.08, 0.45),
+    (0.08, 0.70),
+    (0.92, 0.45),
+    (0.92, 0.70),
+    (0.50, 0.22),
+    (0.35, 0.55),
+    (0.65, 0.55),
+    (0.50, 0.78),
+)
 # SAM returns nested masks; skip one mostly covered by already chosen pieces.
 _MAX_OVERLAP_FRAC = 0.5
 _OPEN_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))

@@ -46,3 +46,22 @@ def test_should_pick_recommended_keeping_multi_finale() -> None:
     assert picked
     assert picked[-1].play_label == "multi"
     assert all(g.play_label != "junk" for g in picked)
+    assert len(picked) >= 3
+
+
+def test_should_not_freeze_at_single_play_when_many_exist() -> None:
+    plays = [
+        KillGroup(events=(_ev(10.0 + i * 8, video=i % 4, score=0.7 + (i % 3) * 0.05), _ev(11.0 + i * 8, video=i % 4)), play_label="multi")
+        for i in range(12)
+    ]
+    picked = pick_recommended(plays, max_plays=14, min_plays=6, density="standard")
+    assert len(picked) >= 6
+
+
+def test_should_pick_all_yolo_plays_when_max_plays_is_zero() -> None:
+    plays = [
+        KillGroup(events=(_ev(10.0 + i * 8, video=i % 4, score=0.7), _ev(11.0 + i * 8, video=i % 4)), play_label="multi")
+        for i in range(9)
+    ]
+    picked = pick_recommended(plays, max_plays=0, density="standard")
+    assert len(picked) == 9

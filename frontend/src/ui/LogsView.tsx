@@ -1,4 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { getStatus, listTasks } from "../api/montage";
+import type { TaskStatus, TaskSummary } from "../api/types";
+import { useProjectStore } from "../state/projectStore";
+import { PipelineSteps } from "./PipelineSteps";
+import { ProgressBar } from "./ProgressBar";
+import {
+  artifactProgressPercent,
+  editorHref,
+  isLiveState,
+  liveProgressPercent,
+  resumeHref,
+  statusLabel,
+  stepsDoneLabel,
+} from "./jobProgress";
 
 type ContainerInfo = {
   id: string;
@@ -63,7 +78,116 @@ function LogPane(props: { title: string; sseUrl: string | null; heightPx?: numbe
   );
 }
 
+function TaskProgressPanel({ taskId }: { taskId: string }) {
+  const setTaskId = useProjectStore((s) => s.setTaskId);
+  const [task, setTask] = useState<TaskSummary | null>(null);
+  const [status, setStatus] = useState<TaskStatus | null>(null);
+
+  useEffect(() => {
+    if (!taskId) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const { tasks } = await listTasks();
+        const found = tasks.find((t) => t.task_id === taskId) ?? null;
+        let nextStatus: TaskStatus | null = null;
+        try {
+          nextStatus = await getStatus(taskId);
+        } catch {
+          nextStatus = null;
+        }
+        if (stop) return;
+        setTask(found);
+        setStatus(nextStatus);
+      } catch {
+        if (!stop) {
+          setTask(null);
+          setStatus(null);
+        }
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 2500);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [taskId]);
+
+  if (!taskId) return null;
+
+  const live = status ? isLiveState(status.state) : false;
+  const pct = task
+    ? live
+      ? liveProgressPercent(status, artifactProgressPercent(task))
+      : artifactProgressPercent(task)
+    : status
+      ? liveProgressPercent(status, 2)
+      : 0;
+  const label = task
+    ? live
+      ? statusLabel(status, task)
+      : stepsDoneLabel(task)
+    : status
+      ? statusLabel(status, {
+          task_id: taskId,
+          song_name: "",
+          num_videos: 0,
+          has_highlights: false,
+          has_selection: false,
+          has_script: false,
+          has_outputs: false,
+          num_highlights: 0,
+          resume_path: "detect",
+          mtime: 0,
+        })
+      : "Loading…";
+
+  return (
+    <div className="panel logs-progress" style={{ marginBottom: 12 }}>
+      <div className="job-card-top">
+        <div>
+          <strong>Job progress</strong>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {taskId.slice(0, 8)}…{task?.song_name ? ` · ${task.song_name}` : ""}
+            {task?.num_highlights ? ` · ${task.num_highlights} kills` : ""}
+          </div>
+        </div>
+        {task ? (
+          <span className={`job-badge job-badge-${task.resume_path}`}>
+            {task.has_outputs ? "done" : task.resume_path}
+          </span>
+        ) : null}
+      </div>
+      <ProgressBar percent={pct} label={label} />
+      {task ? <PipelineSteps resumePath={task.resume_path} hasOutputs={task.has_outputs} /> : null}
+      <div className="job-card-actions" style={{ marginTop: 10 }}>
+        {task ? (
+          <Link
+            className="btn btn-primary"
+            to={resumeHref(task.task_id, task.resume_path)}
+            onClick={() => setTaskId(task.task_id)}
+          >
+            Resume
+          </Link>
+        ) : null}
+        {task?.has_script ? (
+          <Link className="btn" to={editorHref(task.task_id)} onClick={() => setTaskId(task.task_id)}>
+            Open editor
+          </Link>
+        ) : null}
+        <Link className="btn btn-ghost" to="/">
+          All projects
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export function LogsView() {
+  const [searchParams] = useSearchParams();
+  const storeTaskId = useProjectStore((s) => s.taskId);
+  const queryTask = searchParams.get("task") || storeTaskId;
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [tail, setTail] = useState(300);
@@ -71,7 +195,12 @@ export function LogsView() {
   useEffect(() => {
     fetch("/api/containers")
       .then((response) => response.json())
-      .then((data: { containers?: ContainerInfo[] }) => setContainers(data.containers ?? []))
+      .then((data: { containers?: ContainerInfo[] }) => {
+        const list = data.containers ?? [];
+        setContainers(list);
+        const worker = list.find((c) => c.name.includes("worker"));
+        if (worker) setSelectedId((prev) => prev || worker.id);
+      })
       .catch(() => setContainers([]));
   }, []);
 
@@ -84,7 +213,10 @@ export function LogsView() {
     : null;
 
   return (
-    <div>
+    <div className="page">
+      <h1>Logs</h1>
+      <p className="muted">Live container streams plus pipeline progress for the active job.</p>
+      {queryTask ? <TaskProgressPanel taskId={queryTask} /> : null}
       <div style={styles.controls}>
         <label style={styles.label}>
           Container
@@ -139,7 +271,7 @@ export function LogsView() {
           ))}
         </div>
       ) : (
-        <LogPane title={selected ? `${selected.name} (${selected.state})` : "Logs"} sseUrl={selectedSseUrl} heightPx={620} />
+        <LogPane title={selected ? `${selected.name} (${selected.state})` : "Logs"} sseUrl={selectedSseUrl} heightPx={520} />
       )}
     </div>
   );

@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,12 @@ from src.detection.base import DetectionContext, Detector
 from src.detection.registry import register_detector
 
 log = logging.getLogger(__name__)
+
+DEFAULT_VERIFY_FALLBACK_MODELS: tuple[str, ...] = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+)
 
 _VERIFY_PROMPT = """You are verifying ONE candidate kill moment in a Valorant FIRST-PERSON POV clip.
 
@@ -157,17 +163,134 @@ def _decision_accept(parsed: dict[str, Any], min_confidence: float) -> bool:
     return conf >= float(min_confidence)
 
 
+def build_verify_model_chain(
+    primary: str,
+    fallbacks: list[str] | tuple[str, ...] | None = None,
+    *,
+    prefer: str | None = None,
+) -> list[str]:
+    """Ordered unique model ids: prefer (sticky) → primary → fallbacks."""
+    extras = list(fallbacks) if fallbacks is not None else list(DEFAULT_VERIFY_FALLBACK_MODELS)
+    ordered: list[str] = []
+    for name in (prefer, primary, *extras):
+        if not name:
+            continue
+        n = str(name).strip()
+        if n and n not in ordered:
+            ordered.append(n)
+    return ordered
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return (
+        "429" in msg
+        or "resource_exhausted" in msg
+        or "quota" in msg
+        or "rate limit" in msg
+        or "ratelimit" in msg
+    )
+
+
+def generate_verify_with_model_rotation(
+    client: Any,
+    contents: list[Any],
+    *,
+    models: list[str],
+    generate_timeout_sec: float = 90.0,
+    per_model_attempts: int = 2,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Call generateContent; on 429 rotate to the next model.
+
+    Returns (parsed_json_or_none, model_used_or_none).
+    """
+    if not models:
+        return None, None
+
+    for mi, model_name in enumerate(models):
+        for attempt in range(1, max(1, int(per_model_attempts)) + 1):
+            def _call(m: str = model_name) -> Any:
+                return client.models.generate_content(
+                    model=m,
+                    contents=contents,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": _VERIFY_SCHEMA,
+                    },
+                )
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    resp = pool.submit(_call).result(timeout=float(generate_timeout_sec))
+                text = getattr(resp, "text", None) or ""
+                parsed = _parse_verify_json(text)
+                if parsed is None:
+                    log.warning(
+                        "gemini_kill_verify: bad JSON from %s: %s",
+                        model_name,
+                        text[:300],
+                    )
+                    break
+                if mi > 0 or attempt > 1:
+                    log.warning(
+                        "gemini_kill_verify: success model=%s (chain_index=%d attempt=%d)",
+                        model_name,
+                        mi,
+                        attempt,
+                    )
+                return parsed, model_name
+            except FuturesTimeout:
+                log.warning("gemini_kill_verify: generate timed out model=%s", model_name)
+                break
+            except Exception as exc:
+                if _is_rate_limited(exc):
+                    wait_s = min(45, 8 * attempt)
+                    log.warning(
+                        "gemini_kill_verify: 429 model=%s attempt=%d; sleep %ds then rotate/retry",
+                        model_name,
+                        attempt,
+                        wait_s,
+                    )
+                    time.sleep(wait_s)
+                    if attempt < per_model_attempts:
+                        continue
+                    break
+                if "503" in str(exc).lower() or "unavailable" in str(exc).lower():
+                    wait_s = min(30, 10 * attempt)
+                    log.warning(
+                        "gemini_kill_verify: model=%s unavailable; sleep %ds",
+                        model_name,
+                        wait_s,
+                    )
+                    time.sleep(wait_s)
+                    if attempt < per_model_attempts:
+                        continue
+                    break
+                log.warning(
+                    "gemini_kill_verify: model=%s failed: %s",
+                    model_name,
+                    type(exc).__name__,
+                )
+                break
+    return None, None
+
+
 @register_detector("gemini_kill_verify")
 @dataclass
 class GeminiKillVerifyDetector(Detector):
     """Upload short clips around candidates; keep only Gemini-accepted player kills."""
 
     model: str = "gemini-2.5-flash-lite"
+    fallback_models: list[str] = field(
+        default_factory=lambda: list(DEFAULT_VERIFY_FALLBACK_MODELS)
+    )
     clip_pre_sec: float = 1.0
     clip_post_sec: float = 1.2
     min_confidence: float = 0.55
     generate_timeout_sec: float = 90.0
     poll_timeout_sec: float = 120.0
+    # Sticky: last model that returned a valid JSON verdict (survives across clips).
+    _preferred_model: str | None = field(default=None, repr=False, compare=False)
 
     def detect(self, ctx: DetectionContext) -> list[dict[str, Any]]:
         candidates: list[dict] = list(ctx.config.get("_candidate_events") or [])
@@ -206,14 +329,18 @@ class GeminiKillVerifyDetector(Detector):
                     post_sec=self.clip_post_sec,
                     out_path=clip_path,
                 ):
-                    rejected += 1
-                    log.warning("gemini_kill_verify: REJECT clip-cut-fail t=%.3f", ts)
+                    # Fail-open: keep YOLO candidate if we cannot cut a verify clip.
+                    accepted += 1
+                    out.append(dict(cand))
+                    log.warning("gemini_kill_verify: KEEP unverified clip-cut-fail t=%.3f", ts)
                     continue
 
                 verdict = self._verify_clip(client, clip_path)
                 if verdict is None:
-                    rejected += 1
-                    log.warning("gemini_kill_verify: REJECT api-fail t=%.3f", ts)
+                    # Fail-open on API/upload errors — do not wipe the montage.
+                    accepted += 1
+                    out.append(dict(cand))
+                    log.warning("gemini_kill_verify: KEEP unverified api-fail t=%.3f", ts)
                     continue
 
                 ok = _decision_accept(verdict, self.min_confidence)
@@ -292,65 +419,20 @@ class GeminiKillVerifyDetector(Detector):
                 return None
             time.sleep(2)
 
-        models = [self.model]
-        if self.model != "gemini-2.5-flash-lite":
-            models.append("gemini-2.5-flash-lite")
-
-        parsed: dict[str, Any] | None = None
-        for model_name in models:
-            for attempt in range(1, 5):
-                def _call(m: str = model_name) -> Any:
-                    return client.models.generate_content(
-                        model=m,
-                        contents=[file_state, _VERIFY_PROMPT],
-                        config={
-                            "response_mime_type": "application/json",
-                            "response_schema": _VERIFY_SCHEMA,
-                        },
-                    )
-
-                try:
-                    with ThreadPoolExecutor(max_workers=1) as pool:
-                        resp = pool.submit(_call).result(
-                            timeout=float(self.generate_timeout_sec)
-                        )
-                    text = getattr(resp, "text", None) or ""
-                    parsed = _parse_verify_json(text)
-                    if parsed is None:
-                        log.warning("gemini_kill_verify: bad JSON from %s: %s", model_name, text[:300])
-                    break
-                except FuturesTimeout:
-                    log.warning("gemini_kill_verify: generate timed out model=%s", model_name)
-                    parsed = None
-                    break
-                except Exception as exc:
-                    msg = str(exc).lower()
-                    retryable = (
-                        "429" in msg
-                        or "resource_exhausted" in msg
-                        or "quota" in msg
-                        or "503" in msg
-                        or "unavailable" in msg
-                    )
-                    if retryable and attempt < 4:
-                        wait_s = 10 * attempt
-                        log.warning(
-                            "gemini_kill_verify: model=%s attempt %d rate-limited; sleep %ds",
-                            model_name,
-                            attempt,
-                            wait_s,
-                        )
-                        time.sleep(wait_s)
-                        continue
-                    log.warning(
-                        "gemini_kill_verify: model=%s failed: %s",
-                        model_name,
-                        type(exc).__name__,
-                    )
-                    parsed = None
-                    break
-            if parsed is not None:
-                break
+        models = build_verify_model_chain(
+            self.model,
+            self.fallback_models,
+            prefer=self._preferred_model,
+        )
+        parsed, used = generate_verify_with_model_rotation(
+            client,
+            [file_state, _VERIFY_PROMPT],
+            models=models,
+            generate_timeout_sec=float(self.generate_timeout_sec),
+            per_model_attempts=2,
+        )
+        if used:
+            self._preferred_model = used
 
         try:
             client.files.delete(name=uploaded.name)

@@ -1,4 +1,5 @@
 import type { MontageScript, ScriptClip, TimelineOverlay, TimelineProject } from "../api/types";
+import { recipeLabel, transitionLabel } from "./fxLabels";
 
 function clipOut(c: ScriptClip): { start: number; end: number } {
   const start = Number(c.output_start_sec ?? 0);
@@ -26,7 +27,7 @@ export function buildTimelineFromScript(
     return {
       id: `vid-${i}`,
       kind: "video" as const,
-      label: `#${i + 1} V${c.video_index} · ${c.recipe || "clean"}`,
+      label: `Clip ${i + 1} · ${recipeLabel(c.recipe)}`,
       start_sec: start - t0,
       end_sec: end - t0,
       clip_index: i,
@@ -103,27 +104,52 @@ export function buildTimelineFromScript(
         color: "#3dffa8",
       });
     });
+    if (c.recipe && c.recipe !== "clean") {
+      const { end } = clipOut(c);
+      effects.push({
+        id: `recipe-${i}`,
+        kind: "effect",
+        label: recipeLabel(c.recipe),
+        start_sec: rel,
+        end_sec: end - t0,
+        clip_index: i,
+        color: recipeColor(c.recipe),
+      });
+    }
     if (c.ghost_candidate) {
       effects.push({
         id: `ghost-${i}`,
         kind: "effect",
-        label: "ghost",
+        label: "Ghost freeze",
         start_sec: rel,
-        end_sec: rel + 0.5,
+        end_sec: rel + 0.85,
         clip_index: i,
         color: "#a78bfa",
       });
     }
+    if (c.gun_candidate) {
+      effects.push({
+        id: `gun-${i}`,
+        kind: "effect",
+        label: "Weapon glow",
+        start_sec: rel,
+        end_sec: rel + 1.4,
+        clip_index: i,
+        color: "#f5c542",
+      });
+    }
     if (c.transition_to_next?.type) {
       const { end } = clipOut(c);
+      const trDur = Math.max(0.4, Number(c.transition_to_next.duration_sec || 0.55));
+      const trType = String(c.transition_to_next.type);
       effects.push({
         id: `tr-${i}`,
         kind: "effect",
-        label: String(c.transition_to_next.type),
-        start_sec: end - t0 - 0.15,
+        label: transitionLabel(trType),
+        start_sec: Math.max(0, end - t0 - trDur),
         end_sec: end - t0,
         clip_index: i,
-        color: "#ff8b4a",
+        color: trType === "jigsaw" ? "#ff4655" : "#ff8b4a",
       });
     }
   });

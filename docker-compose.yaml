@@ -27,6 +27,8 @@ services:
       - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID:-}
       - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET:-}
       - YOUTUBE_OAUTH_REDIRECT_URI=${YOUTUBE_OAUTH_REDIRECT_URI:-http://127.0.0.1:8000/youtube/callback}
+      - MONTAGE_VIDEO_ROOTS=/videos:/videos_ext
+      - MONTAGE_SONG_ROOTS=/songs:/songs_ext
     ports:
       - "8000:8000"
     volumes:
@@ -35,6 +37,9 @@ services:
       - ./config:/app/config:ro
       - ./songs:/songs:ro
       - ./videos:/videos:ro
+      - /mnt/c/Users/aasid/Music:/songs_ext:ro
+      - /mnt/d/Videos/Valorant:/videos_ext:ro
+      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -65,6 +70,8 @@ services:
       - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID:-}
       - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET:-}
       - YOUTUBE_OAUTH_REDIRECT_URI=${YOUTUBE_OAUTH_REDIRECT_URI:-http://127.0.0.1:8000/youtube/callback}
+      - MONTAGE_VIDEO_ROOTS=/videos:/videos_ext
+      - MONTAGE_SONG_ROOTS=/songs:/songs_ext
     command:
       [
         "celery",
@@ -80,6 +87,9 @@ services:
       - ./config:/app/config:ro
       - ./songs:/songs:ro
       - ./videos:/videos:ro
+      - /mnt/c/Users/aasid/Music:/songs_ext:ro
+      - /mnt/d/Videos/Valorant:/videos_ext:ro
+      - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
       redis:
         condition: service_healthy

@@ -211,6 +211,24 @@ class GlitterEffectConfig(BaseModel):
     intensity: float = Field(ge=0.0, le=1.5, default=0.9)
 
 
+class PlayEndEffectConfig(BaseModel):
+    """Post-kill gameplay boundary (caps + death/round cut; Gemini residual optional)."""
+
+    enabled: bool = True
+    punch_max_post_sec: float = Field(ge=0.2, le=5.0, default=1.2)
+    slow_max_post_sec: float = Field(ge=0.2, le=5.0, default=2.0)
+    cinematic_max_post_sec: float = Field(ge=0.2, le=8.0, default=2.5)
+    clean_max_post_sec: float = Field(ge=0.2, le=5.0, default=1.5)
+    death_pad_sec: float = Field(ge=0.0, le=1.0, default=0.15)
+    sample_fps: float = Field(ge=1.0, le=30.0, default=6.0)
+    # Require this many consecutive death/spectator samples before splitting a play.
+    death_confirm_frames: int = Field(ge=1, le=8, default=2)
+    min_gap_for_break_sec: float = Field(ge=0.2, le=5.0, default=0.8)
+    residual_tail_sec: float = Field(ge=1.0, le=8.0, default=2.5)
+    gemini_enabled: bool = True
+    gemini_model: str = "gemini-2.5-flash-lite"
+
+
 class EffectsConfig(BaseModel):
     # Frame-space effects (ghost) before the camera moves the frame; screen-space
     # effects (flash, PiP card) after it so they stay stable.
@@ -239,6 +257,7 @@ class EffectsConfig(BaseModel):
         ]
     )
     velocity: VelocityEffectConfig = Field(default_factory=VelocityEffectConfig)
+    play_end: PlayEndEffectConfig = Field(default_factory=PlayEndEffectConfig)
     camera: CameraEffectConfig = Field(default_factory=CameraEffectConfig)
     zoom: ZoomEffectConfig = Field(default_factory=ZoomEffectConfig)
     shake: ShakeEffectConfig = Field(default_factory=ShakeEffectConfig)

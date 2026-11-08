@@ -1,9 +1,8 @@
-"""Enemy cut-out at the kill frame via SAM 2 point prompt at the crosshair.
+"""Enemy cut-out at the kill frame via SAM 2 prompts near the crosshair.
 
-On a kill the enemy is normally under the crosshair (screen center), so a
-single positive point is a usable automatic prompt. It fails when the kill
-came from an ability or the enemy already dropped; those masks are rejected
-by size / position checks rather than shipped as a bad cut-out.
+On a kill the enemy is normally under the crosshair (screen center). A single
+center point is brittle; we try a small multi-point cluster + a tight center
+box, then reject masks that fail size / position checks.
 """
 
 from __future__ import annotations
@@ -18,9 +17,18 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 MASK_AREA_RANGE = (0.0015, 0.12)
-MAX_CENTROID_DIST_FRAC = 0.12  # of frame height
-SAMPLE_OFFSETS_SEC = (0.03, 0.12)
+MAX_CENTROID_DIST_FRAC = 0.14  # of frame height
+SAMPLE_OFFSETS_SEC = (0.03, 0.08, 0.14)
 _PAD_PX = 12
+# Fractional offsets from center for multi-point prompts (positive labels).
+_CROSSHAIR_POINT_OFFSETS = (
+    (0.0, 0.0),
+    (0.012, 0.0),
+    (-0.012, 0.0),
+    (0.0, 0.018),
+    (0.0, -0.018),
+)
+_CENTER_BOX_FRAC = 0.08  # half-width/height of the center prompt box
 
 
 class CutoutError(RuntimeError):
@@ -55,17 +63,54 @@ def _valid(mask: np.ndarray) -> bool:
     return float(np.hypot(xs.mean() - w / 2, ys.mean() - h / 2)) <= MAX_CENTROID_DIST_FRAC * h
 
 
-def best_enemy_mask(model, frame_rgb: np.ndarray) -> np.ndarray | None:
-    """Highest-scoring valid SAM mask for a point at screen center, or None."""
-    h, w = frame_rgb.shape[:2]
-    bgr = np.ascontiguousarray(frame_rgb[:, :, ::-1])
-    res = model.predictor(bgr, points=[[w // 2, h // 2]], labels=[1], multimask_output=True)
+def _pick_best_mask(
+    masks: np.ndarray,
+    scores: np.ndarray | None,
+) -> np.ndarray | None:
+    if masks.size == 0:
+        return None
+    conf = scores if scores is not None and len(scores) == len(masks) else np.ones(len(masks))
+    valid = [i for i in range(len(masks)) if _valid(masks[i])]
+    if not valid:
+        return None
+    return masks[max(valid, key=lambda i: float(conf[i]))]
+
+
+def _run_point_prompt(model, bgr: np.ndarray, points: list[list[int]]) -> np.ndarray | None:
+    labels = [1] * len(points)
+    res = model.predictor(bgr, points=points, labels=labels, multimask_output=True)
     if not res or res[0].masks is None:
         return None
     masks = res[0].masks.data.cpu().numpy().astype(bool)
-    scores = res[0].boxes.conf.cpu().numpy() if res[0].boxes is not None else np.ones(len(masks))
-    valid = [i for i in range(len(masks)) if _valid(masks[i])]
-    return masks[max(valid, key=lambda i: scores[i])] if valid else None
+    scores = res[0].boxes.conf.cpu().numpy() if res[0].boxes is not None else None
+    return _pick_best_mask(masks, scores)
+
+
+def _run_box_prompt(model, bgr: np.ndarray, box: list[int]) -> np.ndarray | None:
+    res = model.predictor(bgr, bboxes=[box], multimask_output=True)
+    if not res or res[0].masks is None:
+        return None
+    masks = res[0].masks.data.cpu().numpy().astype(bool)
+    scores = res[0].boxes.conf.cpu().numpy() if res[0].boxes is not None else None
+    return _pick_best_mask(masks, scores)
+
+
+def best_enemy_mask(model, frame_rgb: np.ndarray) -> np.ndarray | None:
+    """Best valid SAM mask near crosshair using multi-point then center-box prompts."""
+    h, w = frame_rgb.shape[:2]
+    bgr = np.ascontiguousarray(frame_rgb[:, :, ::-1])
+    cx, cy = w // 2, h // 2
+    points = [
+        [int(cx + dx * w), int(cy + dy * h)]
+        for dx, dy in _CROSSHAIR_POINT_OFFSETS
+    ]
+    mask = _run_point_prompt(model, bgr, points)
+    if mask is not None:
+        return mask
+    half_w = max(8, int(_CENTER_BOX_FRAC * w))
+    half_h = max(8, int(_CENTER_BOX_FRAC * h))
+    box = [cx - half_w, cy - half_h, cx + half_w, cy + half_h]
+    return _run_box_prompt(model, bgr, box)
 
 
 def to_cutout(frame_rgb: np.ndarray, mask: np.ndarray) -> Cutout:

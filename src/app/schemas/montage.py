@@ -44,6 +44,23 @@ class CreateFromStageRequest(BaseModel):
     num_videos: int = Field(ge=1)
 
 
+class TaskSummary(BaseModel):
+    task_id: str
+    song_name: str = ""
+    num_videos: int = 0
+    has_highlights: bool = False
+    has_selection: bool = False
+    has_script: bool = False
+    has_outputs: bool = False
+    num_highlights: int = 0
+    resume_path: str = "detect"
+    mtime: float = 0.0
+
+
+class TaskListResponse(BaseModel):
+    tasks: list[TaskSummary]
+
+
 class StatusResponse(BaseModel):
     task_id: str
     state: str
@@ -81,6 +98,13 @@ class ScriptResponse(BaseModel):
 
 class ScriptUpdateRequest(BaseModel):
     script: MontageScript
+    render: bool = True
+
+
+class ScriptSaveResponse(BaseModel):
+    task_id: str
+    saved: bool = True
+    render_task_id: str | None = None
 
 
 class PlayFlowScores(BaseModel):
@@ -113,6 +137,8 @@ class RecommendationsResponse(BaseModel):
     recommended_ids: list[str]
     sequence_flow: SequenceFlowScores
     density: str = "standard"
+    recommend_max_plays: int | None = None
+    recommend_min_plays: int | None = None
 
 
 class SelectionConfirmRequest(BaseModel):

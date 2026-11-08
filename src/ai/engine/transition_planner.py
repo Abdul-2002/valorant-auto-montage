@@ -21,7 +21,7 @@ _DURATIONS = {
     "pop_slam": 0.22,
 }
 
-MAX_SCENE_JIGSAWS = 2
+MAX_SCENE_JIGSAWS = 3
 # Same-VOD kills this far apart are different rounds, so the incoming elements differ.
 _NEW_SCENE_GAP_SEC = 30.0
 _FALLBACK_BEAT_SEC = 0.43

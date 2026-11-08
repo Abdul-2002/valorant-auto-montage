@@ -186,14 +186,14 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         video_paths=[Path(p) for p in meta["videos"]],
         out_dir=tdir,
         resolution=(w, h),
-        sam_model_path=Path(config.detection.sam_model_path),
+        sam_model_path=Path(config.detection.resolved_sam_model_path()),
     )
     script = attach_jigsaw_pieces(
         script,
         video_paths=[Path(p) for p in meta["videos"]],
         out_dir=tdir,
         resolution=(w, h),
-        sam_model_path=Path(config.detection.sam_model_path),
+        sam_model_path=Path(config.detection.resolved_sam_model_path()),
     )
     script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
 

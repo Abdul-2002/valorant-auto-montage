@@ -199,7 +199,8 @@ transitions:
   xfade_duration_sec: 0.2
   whip_duration_sec: 0.14
   push_duration_sec: 0.12
-  whoosh_sfx_path: "assets/sfx/whoosh.wav"
+  # Disabled: short whoosh tick on jigsaw/whip cuts reads as a bad click.
+  whoosh_sfx_path: null
   whoosh_gain_db: -10
 
 audio:
@@ -235,8 +236,14 @@ detection:
     min_excitement: 0.3
 
   gemini_kill_verify:
-    enabled: false
+    # Layer B: accept/reject YOLO (or Gemini) kill candidates via short-clip VLM.
+    enabled: true
     model: "gemini-2.5-flash-lite"
+    # On 429, rotate to the next model (quotas are per-model on free tier).
+    fallback_models:
+      - "gemini-2.5-flash"
+      - "gemini-2.0-flash"
+      - "gemini-2.0-flash-lite"
     clip_pre_sec: 1.0
     clip_post_sec: 1.2
     min_confidence: 0.55
@@ -271,6 +278,7 @@ detection:
     model_path: "models/auto_gaming_valorant.pt"
     # 0.5 missed weak killfeed rows (probe: kills at ~0.3–0.45 on some DVRs).
     confidence_threshold: 0.35
+    # Full-frame: this weights pack was trained full-frame; ROI band dropped almost all kills.
     region: [0.0, 0.0, 1.0, 1.0]
     sample_fps: 5
     presence_conf: 0.25
@@ -293,13 +301,25 @@ detection:
     audio_weight: 0.2
     dedup_window_sec: 1.0
 
-  sam_model_path: "models/sam2.1_t.pt"
+  # SAM for jigsaw pieces + ghost cutouts (sparse frames only — not full-video tracking).
+  # Switch one knob: tiny | base | large  (paths auto-resolved).
+  #   tiny  -> models/sam2.1_t.pt   (fast, weaker masks)
+  #   base  -> models/sam2.1_b.pt   (safe on 8GB)
+  #   large -> models/sam2.1_l.pt   (best masks; OK for single-frame on RTX 4060 8GB)
+  sam_variant: base
+  sam_model_path: "models/sam2.1_b.pt"
 
 ai_director:
   enabled: true
   # Gemini only as creative director (effect recipes / pacing), not kill detection.
   provider: "gemini"
   style_preset: "rafialihsan"
+  # standard: multis + strong/labeled singles; dense: multis + ace/clutch singles only.
+  curation_density: standard
+  # Play budget for studio recommendations / unlocked compose curation.
+  # 0 = all YOLO-derived plays (testing). Later: replace with song-duration budget.
+  recommend_max_plays: 0
+  recommend_min_plays: 12
 
   creative_config:
     pacing: 0.9
@@ -312,6 +332,8 @@ ai_director:
     beat_sync_strictness: 0.9
     variety: 0.8
     arc_enabled: true
+    # Explicit: enable scene jigsaws + reference hit/gun language (also in rafialihsan preset).
+    style_fx: reference
 
   gemini:
     api_key: ""

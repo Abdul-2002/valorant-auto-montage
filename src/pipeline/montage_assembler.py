@@ -572,9 +572,11 @@ def render_montage(
         bass_cfg = config.audio.bass_boost.model_dump(mode="json")
         audio_pack = get_audio_effect("bass_boost").from_config(bass_cfg).apply(audio_pack, audio_ctx)
 
-        # Optional whoosh SFX on whip transitions (skip silently if asset missing).
+        # Optional whoosh SFX on whip/jigsaw cuts (off when path is null/empty).
         mixed = audio_pack.get("mixed")
         whoosh_path = getattr(config.transitions, "whoosh_sfx_path", None)
+        if isinstance(whoosh_path, str) and not whoosh_path.strip():
+            whoosh_path = None
         if mixed is not None and whoosh_times_sec and whoosh_path:
             wp = Path(str(whoosh_path))
             if not wp.is_file():

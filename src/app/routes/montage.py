@@ -30,12 +30,15 @@ from src.app.schemas.montage import (
     MountedMediaResponse,
     RecommendationsResponse,
     ScriptResponse,
+    ScriptSaveResponse,
     ScriptUpdateRequest,
     SelectionConfirmRequest,
     SelectionConfirmResponse,
     StageFileResponse,
     StageSessionResponse,
     StatusResponse,
+    TaskListResponse,
+    TaskSummary,
 )
 from src.app.upload_io import safe_filename, stream_request_to_path, stream_upload_file_to_path
 from src.config import AppConfig
@@ -112,6 +115,72 @@ def list_mounted_media() -> MountedMediaResponse:
         for name, path, size in list_media_files(song_roots(), _SONG_SUFFIXES)
     ]
     return MountedMediaResponse(videos=videos, songs=songs)
+
+
+def _resume_path(tdir: Path) -> str:
+    if (tdir / "outputs" / "montage_16x9.mp4").is_file() or (tdir / "outputs" / "montage_9x16.mp4").is_file():
+        return "render"
+    if (tdir / "montage_script.json").is_file():
+        return "edit"
+    if (tdir / "selection.json").is_file():
+        return "compose"
+    if (tdir / "highlights.json").is_file():
+        return "select"
+    return "detect"
+
+
+def _task_summary(task_id: str, tdir: Path) -> TaskSummary | None:
+    if task_id in {"pending", "staging"} or not tdir.is_dir():
+        return None
+    if not (tdir / "meta.json").is_file():
+        return None
+    try:
+        meta = json.loads((tdir / "meta.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    music = str(meta.get("music") or "")
+    song_name = Path(music).name if music else ""
+    if song_name.startswith("music_"):
+        song_name = song_name[len("music_") :]
+    hl_n = 0
+    hl_path = tdir / "highlights.json"
+    if hl_path.is_file():
+        try:
+            hl_n = len(json.loads(hl_path.read_text(encoding="utf-8")).get("highlights") or [])
+        except Exception:
+            hl_n = 0
+    try:
+        mtime = float(tdir.stat().st_mtime)
+    except OSError:
+        mtime = 0.0
+    return TaskSummary(
+        task_id=task_id,
+        song_name=song_name,
+        num_videos=len(meta.get("videos") or []),
+        has_highlights=hl_path.is_file(),
+        has_selection=(tdir / "selection.json").is_file(),
+        has_script=(tdir / "montage_script.json").is_file(),
+        has_outputs=(tdir / "outputs" / "montage_16x9.mp4").is_file()
+        or (tdir / "outputs" / "montage_9x16.mp4").is_file(),
+        num_highlights=hl_n,
+        resume_path=_resume_path(tdir),
+        mtime=mtime,
+    )
+
+
+@router.get("/tasks", response_model=TaskListResponse)
+def list_tasks(storage_dir: Path = Depends(get_storage_dir)) -> TaskListResponse:
+    """Read-only scan of STORAGE_DIR/tasks for the Projects UI."""
+    root = storage_dir / "tasks"
+    if not root.is_dir():
+        return TaskListResponse(tasks=[])
+    items: list[TaskSummary] = []
+    for child in root.iterdir():
+        summary = _task_summary(child.name, child)
+        if summary is not None:
+            items.append(summary)
+    items.sort(key=lambda t: t.mtime, reverse=True)
+    return TaskListResponse(tasks=items)
 
 
 def _stage_root(storage_dir: Path, session_id: str) -> Path:
@@ -414,8 +483,15 @@ def get_recommendations(
     if not (tdir / "meta.json").exists():
         raise HTTPException(status_code=404, detail="Unknown task_id")
     use_density = density or str(getattr(config.ai_director, "curation_density", "standard") or "standard")
+    max_plays = int(getattr(config.ai_director, "recommend_max_plays", 0) or 0)
+    min_plays = int(getattr(config.ai_director, "recommend_min_plays", 12) or 12)
     plays = _plays_for_task(tdir, config)
-    payload = recommendations_payload(plays, density=use_density)
+    payload = recommendations_payload(
+        plays,
+        density=use_density,
+        max_plays=max_plays,
+        min_plays=min_plays,
+    )
     (tdir / "recommendations.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return RecommendationsResponse(task_id=task_id, **payload)
 
@@ -505,17 +581,37 @@ def get_script(task_id: str, storage_dir: Path = Depends(get_storage_dir)) -> Sc
     return ScriptResponse(task_id=task_id, script=script)
 
 
-@router.post("/{task_id}/script", response_model=ConfirmResponse)
+def _ensure_confirmed_for_render(tdir: Path) -> None:
+    """Render worker requires confirmed.json; studio path may only have highlights + script."""
+    confirmed_path = tdir / "confirmed.json"
+    if confirmed_path.is_file():
+        return
+    hl_path = tdir / "highlights.json"
+    if not hl_path.is_file():
+        raise HTTPException(status_code=400, detail="highlights.json missing — cannot render")
+    raw = json.loads(hl_path.read_text(encoding="utf-8"))
+    highlights = raw.get("highlights", raw if isinstance(raw, list) else [])
+    confirmed_path.write_text(
+        json.dumps({"highlights": highlights, "overrides": None}, indent=2),
+        encoding="utf-8",
+    )
+
+
+@router.post("/{task_id}/script", response_model=ScriptSaveResponse)
 def update_script_and_render(
     task_id: str,
     body: ScriptUpdateRequest,
     storage_dir: Path = Depends(get_storage_dir),
-) -> ConfirmResponse:
+) -> ScriptSaveResponse:
     tdir = _task_dir(storage_dir, task_id)
     if not (tdir / "meta.json").exists():
         raise HTTPException(status_code=404, detail="Unknown task_id")
 
     (tdir / "montage_script.json").write_text(body.script.model_dump_json(indent=2), encoding="utf-8")
 
+    if not body.render:
+        return ScriptSaveResponse(task_id=task_id, saved=True, render_task_id=None)
+
+    _ensure_confirmed_for_render(tdir)
     render_task = render_montage_task.delay({"detect_task_id": task_id})
-    return ConfirmResponse(task_id=task_id, render_task_id=render_task.id)
+    return ScriptSaveResponse(task_id=task_id, saved=True, render_task_id=render_task.id)

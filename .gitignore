@@ -24,9 +24,13 @@ library.sqlite3
 artifacts/
 runs/
 tmp/
+tmp_*
 *.log
 codebase_dump.txt
 editing_sfx/
+
+# accidental template / shell expansion junk
+{{*}}
 
 # montage I/O — keep folder placeholders via .gitkeep only
 videos/*
@@ -67,5 +71,6 @@ Thumbs.db
 Desktop.ini
 .idea/
 .vscode/
-# Keep .cursor/rules; ignore personal Cursor notes in the folder root
-.cursor/*.md
+
+# Cursor / ECC local tooling (do not push to origin)
+.cursor/

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.config.effect_models import (  # noqa: F401  (re-exported for existing imports)
     CameraEffectConfig,
@@ -21,6 +21,7 @@ from src.config.effect_models import (  # noqa: F401  (re-exported for existing 
     LightWrapEffectConfig,
     MotionBlurEffectConfig,
     PipInsetEffectConfig,
+    PlayEndEffectConfig,
     RgbSplitEffectConfig,
     ScopeVignetteEffectConfig,
     ShakeEffectConfig,
@@ -138,6 +139,7 @@ class AutoGamingYoloConfig(BaseModel):
     enabled: bool = True
     model_path: str = "models/auto_gaming_valorant.pt"
     confidence_threshold: float = Field(ge=0.0, le=1.0, default=0.35)
+    # Full-frame (model trained this way). Optional killfeed ROI is config-only.
     region: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
     sample_fps: int = Field(ge=1, le=60, default=5)
     presence_conf: float = Field(ge=0.0, le=1.0, default=0.25)
@@ -184,6 +186,14 @@ class GeminiKillVerifyConfig(BaseModel):
 
     enabled: bool = False
     model: str = "gemini-2.5-flash-lite"
+    # Tried in order after primary on 429 / quota exhaustion (per-model free-tier limits).
+    fallback_models: list[str] = Field(
+        default_factory=lambda: [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+        ]
+    )
     clip_pre_sec: float = Field(ge=0.3, le=3.0, default=1.0)
     clip_post_sec: float = Field(ge=0.3, le=3.0, default=1.2)
     min_confidence: float = Field(ge=0.0, le=1.0, default=0.55)
@@ -206,6 +216,20 @@ class HudOcrConfig(BaseModel):
     ])
 
 
+# Jigsaw / ghost cutouts only (sparse frames). Switch via detection.sam_variant.
+SAM_VARIANT_PATHS: dict[str, str] = {
+    "tiny": "models/sam2.1_t.pt",
+    "base": "models/sam2.1_b.pt",
+    "large": "models/sam2.1_l.pt",
+}
+# Reject truncated / mislabeled downloads (Large ≈400MB+, Base ≈160MB).
+SAM_VARIANT_MIN_BYTES: dict[str, int] = {
+    "tiny": 40_000_000,
+    "base": 100_000_000,
+    "large": 300_000_000,
+}
+
+
 class DetectionConfig(BaseModel):
     # Kill detection is local YOLO (auto_gaming). Gemini is reserved for ai_director only.
     strategy: Literal["gemini", "yolo_legacy", "hybrid"] = "yolo_legacy"
@@ -218,7 +242,39 @@ class DetectionConfig(BaseModel):
     auto_gaming_yolo: AutoGamingYoloConfig = Field(default_factory=AutoGamingYoloConfig)
     audio_peaks: AudioPeaksConfig = Field(default_factory=AudioPeaksConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
-    sam_model_path: str = "models/sam2.1_t.pt"
+    # Easy accessibility: change only sam_variant (tiny|base|large). Path follows.
+    sam_variant: Literal["tiny", "base", "large"] = "large"
+    sam_model_path: str = "models/sam2.1_l.pt"
+
+    @model_validator(mode="after")
+    def _sync_sam_model_path_from_variant(self) -> DetectionConfig:
+        mapped = SAM_VARIANT_PATHS.get(str(self.sam_variant))
+        if mapped and self.sam_model_path != mapped:
+            self.sam_model_path = mapped
+        return self
+
+    def resolved_sam_model_path(self) -> str:
+        """Weights path for jigsaw / ghost / weapon SAM loads.
+
+        Honors ``sam_variant``. If the preferred file is missing on disk, falls
+        back base → tiny so renders still work while Large is downloading.
+        """
+        from pathlib import Path
+
+        preferred = str(self.sam_variant)
+        ladder = [preferred] + [k for k in ("large", "base", "tiny") if k != preferred]
+        for key in ladder:
+            rel = SAM_VARIANT_PATHS.get(key)
+            if not rel:
+                continue
+            min_bytes = int(SAM_VARIANT_MIN_BYTES.get(key, 1_000_000))
+            for candidate in (Path(rel), Path("/app") / rel):
+                try:
+                    if candidate.is_file() and candidate.stat().st_size >= min_bytes:
+                        return rel
+                except OSError:
+                    continue
+        return SAM_VARIANT_PATHS.get(preferred, self.sam_model_path)
 
 
 class CreativeConfig(BaseModel):
@@ -262,6 +318,9 @@ class AIDirectorConfig(BaseModel):
     curation_density: Literal["standard", "dense"] = "standard"
     # Prefer sequence flow (pacing/arc/variety) over raw impact packing.
     use_flow_scoring: bool = True
+    # 0 = use every YOLO-derived play (no artificial ceiling). Future: song-aware budget.
+    recommend_max_plays: int = Field(ge=0, default=0)
+    recommend_min_plays: int = Field(ge=0, default=12)
     creative_config: CreativeConfig = Field(default_factory=CreativeConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     openai_compatible: OpenAICompatibleConfig = Field(default_factory=OpenAICompatibleConfig)

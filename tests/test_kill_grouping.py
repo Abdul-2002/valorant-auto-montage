@@ -78,6 +78,28 @@ def test_should_keep_a_double_as_one_clip_when_gap_is_inside_the_round_window() 
     assert [len(g.events) for g in groups] == [2]
 
 
+def test_should_split_burst_when_death_break_falls_between_kills() -> None:
+    groups = group_kills([_ev(10.0), _ev(12.0), _ev(14.0)], death_breaks=[(0, 12.5)])
+    assert [len(g.events) for g in groups] == [2, 1]
+    assert list(groups[0].kill_secs) == [10.0, 12.0]
+    assert list(groups[1].kill_secs) == [14.0]
+
+
+def test_should_not_join_round_chain_across_a_death_break() -> None:
+    # Gaps are inside ROUND_GAP_SEC, but death at 18 must keep plays separate.
+    base = group_kills([_ev(10.0), _ev(16.0), _ev(22.0), _ev(27.0)])
+    joined = join_round_chains(base, death_breaks=[(0, 18.0)])
+    assert [len(g.events) for g in joined] == [2, 2]
+
+
+def test_build_play_flows_should_honor_death_breaks() -> None:
+    plays = build_play_flows(
+        [_ev(t) for t in (10.0, 14.0, 18.0, 22.0)],
+        death_breaks=[(0, 15.5)],
+    )
+    assert [len(g.events) for g in plays] == [2, 2]
+
+
 def test_should_not_join_kills_when_the_gap_exceeds_the_round_window() -> None:
     groups = join_round_chains(group_kills([_ev(10.0), _ev(25.0), _ev(29.0)]))
     assert [len(g.events) for g in groups] == [1, 2]

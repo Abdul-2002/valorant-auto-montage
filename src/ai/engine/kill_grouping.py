@@ -101,23 +101,45 @@ class KillGroup:
         )
 
 
+def _breaks_for_video(death_breaks: Sequence[tuple[int, float]] | None, video_index: int) -> tuple[float, ...]:
+    if not death_breaks:
+        return ()
+    return tuple(float(t) for vi, t in death_breaks if int(vi) == int(video_index))
+
+
+def _crosses_death_break(prev_kill_sec: float, next_kill_sec: float, breaks: Sequence[float]) -> bool:
+    lo, hi = float(prev_kill_sec), float(next_kill_sec)
+    return any(lo < float(b) <= hi for b in breaks)
+
+
 def group_kills(
     events: Sequence[EnrichedEvent],
     *,
     max_gap_sec: float = MAX_KILL_GAP_SEC,
     max_kills: int = MAX_KILLS_PER_CLIP,
+    death_breaks: Sequence[tuple[int, float]] | None = None,
 ) -> list[KillGroup]:
-    """Split each video's kills into bursts; montage order follows source time."""
+    """Split each video's kills into bursts; montage order follows source time.
+
+    ``death_breaks`` are (video_index, time_sec) markers — a new burst starts when
+    the gap from the previous kill crosses a player-death / spectator boundary.
+    """
     by_video: dict[int, list[EnrichedEvent]] = {}
     for ev in events:
         by_video.setdefault(int(ev.event.video_index), []).append(ev)
     groups: list[KillGroup] = []
-    for items in by_video.values():
+    for video_index, items in by_video.items():
         items.sort(key=lambda e: float(e.event.timestamp_sec))
+        breaks = _breaks_for_video(death_breaks, video_index)
         current: list[EnrichedEvent] = []
         for ev in items:
             gap = float(ev.event.timestamp_sec) - float(current[-1].event.timestamp_sec) if current else 0.0
-            if current and (gap > max_gap_sec or len(current) >= max_kills):
+            died = bool(
+                current
+                and breaks
+                and _crosses_death_break(float(current[-1].event.timestamp_sec), float(ev.event.timestamp_sec), breaks)
+            )
+            if current and (gap > max_gap_sec or len(current) >= max_kills or died):
                 groups.append(KillGroup(tuple(current)))
                 current = []
             current.append(ev)
@@ -138,7 +160,11 @@ def _emit_chain(chain: Sequence[KillGroup]) -> list[KillGroup]:
     return [KillGroup(tuple(e for g in chain for e in g.events), play_label=_best_label(chain))]
 
 
-def _chain_video(items: Sequence[KillGroup]) -> list[KillGroup]:
+def _chain_video(
+    items: Sequence[KillGroup],
+    *,
+    death_breaks: Sequence[float] = (),
+) -> list[KillGroup]:
     """Join consecutive groups while each step stays inside the round limits."""
     out: list[KillGroup] = []
     chain: list[KillGroup] = []
@@ -146,7 +172,8 @@ def _chain_video(items: Sequence[KillGroup]) -> list[KillGroup]:
         if chain:
             gap = group.kill_secs[0] - chain[-1].kill_secs[-1]
             span = group.kill_secs[-1] - chain[0].kill_secs[0]
-            if gap > ROUND_GAP_SEC or span > ROUND_SPAN_SEC:
+            died = _crosses_death_break(chain[-1].kill_secs[-1], group.kill_secs[0], death_breaks)
+            if gap > ROUND_GAP_SEC or span > ROUND_SPAN_SEC or died:
                 out.extend(_emit_chain(chain))
                 chain = []
         chain.append(group)
@@ -155,15 +182,19 @@ def _chain_video(items: Sequence[KillGroup]) -> list[KillGroup]:
     return out
 
 
-def join_round_chains(groups: Sequence[KillGroup]) -> list[KillGroup]:
+def join_round_chains(
+    groups: Sequence[KillGroup],
+    *,
+    death_breaks: Sequence[tuple[int, float]] | None = None,
+) -> list[KillGroup]:
     """One clip for a same-VOD run of 2+ kills (double, triple, ace, …)."""
     by_video: dict[int, list[KillGroup]] = {}
     for group in groups:
         by_video.setdefault(group.video_index, []).append(group)
     merged: list[KillGroup] = []
-    for items in by_video.values():
+    for video_index, items in by_video.items():
         items.sort(key=lambda g: g.kill_secs[0])
-        merged.extend(_chain_video(items))
+        merged.extend(_chain_video(items, death_breaks=_breaks_for_video(death_breaks, video_index)))
     merged.sort(key=lambda g: (g.kill_secs[0], g.video_index))
     return merged
 
@@ -319,7 +350,12 @@ def collapse_killfeed_flicker(
     return out
 
 
-def build_play_flows(events: Sequence[EnrichedEvent], *, near_dup_sec: float = 0.8) -> list[KillGroup]:
+def build_play_flows(
+    events: Sequence[EnrichedEvent],
+    *,
+    near_dup_sec: float = 0.8,
+    death_breaks: Sequence[tuple[int, float]] | None = None,
+) -> list[KillGroup]:
     """Detector events → continuous plays (singles, sprays, full ace/quadra runs)."""
     clean = collapse_killfeed_flicker(events, near_dup_sec=near_dup_sec)
-    return join_round_chains(group_kills(clean))
+    return join_round_chains(group_kills(clean, death_breaks=death_breaks), death_breaks=death_breaks)

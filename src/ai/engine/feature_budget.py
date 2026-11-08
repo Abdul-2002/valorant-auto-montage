@@ -16,7 +16,7 @@ from typing import Sequence
 PIP_STYLES: tuple[str, ...] = ("freeze_inset", "replay_inset")
 MAX_PIP = 4
 MAX_GHOST_CANDIDATES = 4
-MAX_GUN_OUTLINES = 3
+MAX_GUN_OUTLINES = 5
 _GUN_RECIPES = frozenset({"slow", "cinematic"})
 
 
@@ -58,10 +58,10 @@ def assign_features(
         reverse=True,
     )
     ghosts = set(ghost_pool[:MAX_GHOST_CANDIDATES])
-    # Gun outline needs slow-mo screen time; it may stack with ghosts on showpiece kills.
+    # Gun outline needs slow-mo screen time; opener + body holds qualify (not punch).
     gun_pool = sorted(
-        (i for i in range(1, n) if recipes[i] in _GUN_RECIPES and i not in pip_styles),
-        key=lambda i: scores[i],
+        (i for i in range(0, n) if recipes[i] in _GUN_RECIPES and i not in pip_styles),
+        key=lambda i: (recipes[i] == "cinematic", scores[i]),
         reverse=True,
     )
     gun_idx: list[int] = []

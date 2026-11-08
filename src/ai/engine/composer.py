@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -20,6 +21,8 @@ from src.ai.engine.kill_grouping import (
     fit_groups_to_duration,
     with_locked_finale,
 )
+from src.ai.engine.play_end import PlayEndConfig, apply_play_end_to_clips
+from src.ai.engine.play_end_gemini import collect_gemini_ends_for_clips
 from src.ai.engine.transition_planner import plan_transitions
 from src.ai.schema import CreativeBrief, MontageScript, ScriptClip
 from src.config.models import VelocityEffectConfig
@@ -59,8 +62,17 @@ class ComposeInputs:
     # "standard" = multis + strong/labeled singles; "dense" = multis + ace/clutch singles only.
     curation_density: str = "standard"
     use_flow_scoring: bool = True
+    # 0 = all YOLO-derived plays. Sourced from ai_director config.
+    recommend_max_plays: int = 0
+    recommend_min_plays: int = 12
     # Studio confirmed set — do not re-drop plays in curate_plays.
     selection_locked: bool = False
+    # Source VODs for post-kill death scans (Layer 1) and residual Gemini (Layer 3).
+    video_paths: list[Path] | None = None
+    play_end: PlayEndConfig = field(default_factory=PlayEndConfig)
+    # (video_index, death_sec) markers that already split plays upstream (Layer 2).
+    death_breaks: tuple[tuple[int, float], ...] = ()
+    gemini_api_key: str = ""
 
 
 def _bar_mode(beat_map: BeatMap | None) -> bool:
@@ -112,7 +124,10 @@ def select_kill_groups(
     duration_mode: str = "fixed",
     curation_density: str = "standard",
     use_flow_scoring: bool = True,
+    recommend_max_plays: int = 0,
+    recommend_min_plays: int = 12,
     selection_locked: bool = False,
+    death_breaks: tuple[tuple[int, float], ...] = (),
 ) -> list[KillGroup]:
     """Build continuous plays, keep the most impactful ones, finale = biggest multi-kill.
 
@@ -126,30 +141,28 @@ def select_kill_groups(
     is derived later from the kept plays' natural bar needs.
     """
     del brief  # Director brief is optional; labels live on KillGroup.play_label.
-    plays = list(labeled_plays) if labeled_plays is not None else build_play_flows(enriched, near_dup_sec=NEAR_DUP_WINDOW_SEC)
+    plays = (
+        list(labeled_plays)
+        if labeled_plays is not None
+        else build_play_flows(enriched, near_dup_sec=NEAR_DUP_WINDOW_SEC, death_breaks=death_breaks)
+    )
     interval = beat_interval(beat_map, target_sec)
     clip_driven = str(duration_mode) == "clip_driven"
     if selection_locked and plays:
+        # Studio confirmed set is authoritative — do not drop plays to fit a music bed.
         ordered = with_locked_finale(plays)
-        budget = float(target_sec)
-        if _bar_mode(beat_map):
-            bar_sec = BEATS_PER_BAR * interval
-            budget = float(target_sec) if clip_driven else (song_end_sec(beat_map) - float(beat_map.downbeat_times[0]))
-            ordered = fit_groups_to_duration(
-                ordered,
-                target_sec=budget,
-                beat_interval=interval,
-                min_clip_sec=lambda g: bars_needed(g.demand(), interval) * bar_sec,
-            )
-        else:
-            ordered = fit_groups_to_duration(ordered, target_sec=budget, beat_interval=interval)
     elif _bar_mode(beat_map):
         bar_sec = BEATS_PER_BAR * interval
         # Fixed mode may use the full bed as the fit budget; clip_driven uses the ceiling only.
         budget = float(target_sec) if clip_driven else (song_end_sec(beat_map) - float(beat_map.downbeat_times[0]))
         min_clip = lambda g: bars_needed(g.demand(), interval) * bar_sec
         if use_flow_scoring:
-            picked = pick_recommended(plays, max_plays=16, density=str(curation_density))
+            picked = pick_recommended(
+                plays,
+                max_plays=int(recommend_max_plays),
+                min_plays=int(recommend_min_plays),
+                density=str(curation_density),
+            )
             kept = fit_groups_to_duration(
                 picked, target_sec=budget, beat_interval=interval, min_clip_sec=min_clip
             )
@@ -166,7 +179,12 @@ def select_kill_groups(
             ordered = with_locked_finale(kept)
     else:
         if use_flow_scoring:
-            picked = pick_recommended(plays, max_plays=16, density=str(curation_density))
+            picked = pick_recommended(
+                plays,
+                max_plays=int(recommend_max_plays),
+                min_plays=int(recommend_min_plays),
+                density=str(curation_density),
+            )
             ordered = fit_groups_to_duration(picked, target_sec=target_sec, beat_interval=interval)
         else:
             kept = curate_plays(
@@ -191,11 +209,33 @@ def select_kill_groups(
 
 def _plan(inp: ComposeInputs, groups: list[KillGroup]) -> list[ClipBeatPlan]:
     demands = [g.demand() for g in groups]
+    interval = beat_interval(inp.beat_map, float(inp.target_duration_sec))
+    # Studio-locked picks must all land: size the bed from demands, don't clamp to
+    # target_duration / short song end (that was dropping selected plays).
+    if bool(inp.selection_locked):
+        bed = estimate_montage_seconds(demands, beat_interval=interval) + (BEATS_PER_BAR * interval)
+        bed = max(bed, interval * BEATS_PER_BAR * 2, float(inp.target_duration_sec), 120.0)
+        song = song_end_sec(inp.beat_map) if inp.beat_map is not None else 0.0
+        # Real beat grids stop at song end; past that plan_kill_accents silently
+        # truncates. Use a synthetic grid when the bed needs more room than the song.
+        bm = inp.beat_map if song >= bed * 0.95 else None
+        logger.info(
+            "composer: selection_locked bed %.1fs for %d plays (song=%.1fs synthetic=%s)",
+            bed,
+            len(demands),
+            song,
+            bm is None,
+        )
+        return plan_kill_accents(
+            beat_map=bm,
+            demands=demands,
+            target_duration_sec=bed,
+            start_beat_index=0,
+        )
     if _bar_mode(inp.beat_map):
         end = song_end_sec(inp.beat_map)
         start_at_zero = False
         if str(inp.duration_mode) == "clip_driven":
-            interval = beat_interval(inp.beat_map, float(inp.target_duration_sec))
             bed = estimate_montage_seconds(demands, beat_interval=interval)
             # Small pad so allocate_bars/grow + post-kill room do not clip the finale.
             bed = bed + (BEATS_PER_BAR * interval)
@@ -215,7 +255,6 @@ def _plan(inp: ComposeInputs, groups: list[KillGroup]) -> list[ClipBeatPlan]:
         )
     plan_target = float(inp.target_duration_sec)
     if str(inp.duration_mode) == "clip_driven":
-        interval = beat_interval(inp.beat_map, plan_target)
         plan_target = min(plan_target, estimate_montage_seconds(demands, beat_interval=interval))
     return plan_kill_accents(
         beat_map=inp.beat_map,
@@ -272,23 +311,54 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         duration_mode=str(inp.duration_mode),
         curation_density=str(inp.curation_density),
         use_flow_scoring=bool(inp.use_flow_scoring),
+        recommend_max_plays=int(inp.recommend_max_plays),
+        recommend_min_plays=int(inp.recommend_min_plays),
         selection_locked=bool(inp.selection_locked),
+        death_breaks=tuple(inp.death_breaks),
     )
     plans = _plan(inp, groups)
     if len(plans) < len(groups):
         dropped = len(groups) - len(plans)
-        logger.warning("composer: song too short for %d clips; dropped %d from body (keep finale)", len(groups), dropped)
-        # Never truncate the locked finale — drop weakest body plays instead.
-        if len(plans) >= 1 and len(groups) >= 2:
-            body = list(groups[:-1])
-            finale = groups[-1]
-            keep_body = max(0, len(plans) - 1)
-            # body is rising-impact ordered; drop from the front (weakest).
-            groups = body[len(body) - keep_body :] + [finale] if keep_body else [finale]
-            plans = _plan(inp, groups)
-            if len(plans) < len(groups):
+        if bool(inp.selection_locked):
+            # Expand on a synthetic grid; never silently discard studio-confirmed plays.
+            logger.warning(
+                "composer: selection_locked fit %d/%d — expanding synthetic bed and retrying",
+                len(plans),
+                len(groups),
+            )
+            interval = beat_interval(inp.beat_map, float(inp.target_duration_sec))
+            bed = estimate_montage_seconds([g.demand() for g in groups], beat_interval=interval)
+            bed = max(bed * 2.5, float(inp.target_duration_sec) * 2.0, 180.0)
+            plans = plan_kill_accents(
+                beat_map=None,
+                demands=[g.demand() for g in groups],
+                target_duration_sec=bed,
+                start_beat_index=0,
+            )
+        if len(plans) < len(groups) and not bool(inp.selection_locked):
+            logger.warning(
+                "composer: song too short for %d clips; dropped %d from body (keep finale)",
+                len(groups),
+                dropped,
+            )
+            # Never truncate the locked finale — drop weakest body plays instead.
+            if len(plans) >= 1 and len(groups) >= 2:
+                body = list(groups[:-1])
+                finale = groups[-1]
+                keep_body = max(0, len(plans) - 1)
+                # body is rising-impact ordered; drop from the front (weakest).
+                groups = body[len(body) - keep_body :] + [finale] if keep_body else [finale]
+                plans = _plan(inp, groups)
+                if len(plans) < len(groups):
+                    groups = groups[: len(plans)]
+            else:
                 groups = groups[: len(plans)]
-        else:
+        elif len(plans) < len(groups):
+            logger.error(
+                "composer: selection_locked still short %d/%d after expand — truncating as last resort",
+                len(plans),
+                len(groups),
+            )
             groups = groups[: len(plans)]
     phases = assign_arc_phases(
         num_clips=len(plans), brief=inp.brief, beat_map=inp.beat_map, clip_output_starts_sec=[p.output_start_sec for p in plans]
@@ -337,6 +407,7 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         sum(1 for f in features if f.ghost_candidate),
         len(directed_recipes),
     )
+    clips = _apply_play_end_boundary(clips, inp)
     clips = _with_transitions(clips, inp)
     return MontageScript(
         clips=clips or [ScriptClip(video_index=0, start_sec=0.0, end_sec=0.05, kill_timestamp_sec=0.0, score=0.0)],
@@ -344,3 +415,43 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         brief=inp.brief,
         reasoning=inp.brief.reasoning if inp.brief is not None else "",
     )
+
+
+def _apply_play_end_boundary(clips: list[ScriptClip], inp: ComposeInputs) -> list[ScriptClip]:
+    """Layers 1+3: clamp post-kill fluff, optionally tighten residual tails via Gemini."""
+    cfg = inp.play_end
+    if not cfg.enabled or not clips:
+        return clips
+    paths = list(inp.video_paths or [])
+    gemini_ends: dict[tuple[int, float], float] = {}
+    # Skip residual Gemini when selection is locked — Layer 1 caps are enough and a
+    # bad API key was stalling compose with per-clip uploads.
+    if paths and cfg.gemini_enabled and inp.gemini_api_key and not bool(inp.selection_locked):
+        try:
+            gemini_ends = collect_gemini_ends_for_clips(
+                clips,
+                cfg=cfg,
+                video_paths=paths,
+                api_key=str(inp.gemini_api_key),
+            )
+        except Exception:
+            logger.exception("composer: gemini play-end arbiter failed; continuing with Layer 1 only")
+            gemini_ends = {}
+    trimmed = apply_play_end_to_clips(
+        clips,
+        cfg=cfg,
+        video_paths=paths or None,
+        gemini_ends=gemini_ends or None,
+    )
+    shortened = sum(
+        1
+        for a, b in zip(clips, trimmed)
+        if float(b.end_sec) + 1e-3 < float(a.end_sec) or float(b.output_end_sec or 0) + 1e-3 < float(a.output_end_sec or 0)
+    )
+    logger.info(
+        "composer: play_end trimmed %d/%d clips (gemini_hints=%d)",
+        shortened,
+        len(trimmed),
+        len(gemini_ends),
+    )
+    return trimmed

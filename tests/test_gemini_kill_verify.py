@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from src.detection.gemini_kill_verify import _decision_accept, _parse_verify_json
+from src.detection.gemini_kill_verify import (
+    _decision_accept,
+    _parse_verify_json,
+    build_verify_model_chain,
+)
 
 
 def test_parse_verify_json_object() -> None:
@@ -46,3 +50,23 @@ def test_reject_low_confidence() -> None:
         "reason": "unsure",
     }
     assert _decision_accept(parsed, 0.55) is False
+
+
+def test_build_verify_model_chain_prefer_then_primary_then_fallbacks() -> None:
+    chain = build_verify_model_chain(
+        "gemini-2.5-flash-lite",
+        ["gemini-2.5-flash", "gemini-2.0-flash"],
+        prefer="gemini-2.5-flash",
+    )
+    assert chain[0] == "gemini-2.5-flash"
+    assert "gemini-2.5-flash-lite" in chain
+    assert chain.count("gemini-2.5-flash") == 1
+
+
+def test_build_verify_model_chain_dedupes() -> None:
+    chain = build_verify_model_chain(
+        "gemini-2.5-flash",
+        ["gemini-2.5-flash", "gemini-2.0-flash"],
+        prefer="gemini-2.5-flash",
+    )
+    assert chain == ["gemini-2.5-flash", "gemini-2.0-flash"]

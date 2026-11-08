@@ -96,23 +96,63 @@ def rank_for_flow(groups: Sequence[KillGroup]) -> list[KillGroup]:
     return sorted(groups, key=lambda g: (score_play(g).combined, _group_value(g)), reverse=True)
 
 
+def resolve_recommend_budget(
+    n_plays: int,
+    *,
+    max_plays: int = 0,
+    min_plays: int | None = None,
+    density: str = "standard",
+) -> tuple[int, int]:
+    """Resolve play budget from config.
+
+    ``max_plays <= 0`` means all YOLO-derived plays (no artificial ceiling).
+    When the ceiling is unlimited, the floor matches so flow scoring does not trim.
+    """
+    n = max(0, int(n_plays))
+    if int(max_plays) <= 0:
+        return n, n
+    mx = min(int(max_plays), n)
+    if min_plays is None:
+        floor = 10 if str(density) == "dense" else 6
+    else:
+        floor = int(min_plays)
+    mn = min(max(floor, 0), mx)
+    return mx, mn
+
+
 def pick_recommended(
     groups: Sequence[KillGroup],
     *,
-    max_plays: int = 14,
+    max_plays: int = 0,
+    min_plays: int | None = None,
     density: str = "standard",
 ) -> list[KillGroup]:
-    """Greedy pick that maximizes sequence flow under a play budget."""
+    """Greedy pick that fills a play budget without collapsing on a single perfect play.
+
+    A lone play scores sequence_flow≈1.0; requiring `seq >= best` forever freezes at
+    1 clip. Fill to ``min_plays`` first, then only accept additions that do not tank
+    flow by more than a small slack.
+
+    ``max_plays <= 0`` selects every usable YOLO-derived play (testing / no ceiling).
+    """
     usable = [g for g in groups if g.play_label != "junk"]
     if str(density) == "dense":
         usable = [g for g in usable if len(g.events) >= 2 or g.play_label in {"ace", "clutch"}]
     if not usable:
         usable = list(groups)
     ranked = rank_for_flow(usable)
+    max_cap, min_cap = resolve_recommend_budget(
+        len(ranked),
+        max_plays=max_plays,
+        min_plays=min_plays,
+        density=density,
+    )
+    if max_cap <= 0:
+        return []
     picked: list[KillGroup] = []
     best_seq = -1.0
     for cand in ranked:
-        if len(picked) >= max_plays:
+        if len(picked) >= max_cap:
             break
         trial = picked + [cand]
         # Keep a provisional finale = best impact in trial.
@@ -121,9 +161,13 @@ def pick_recommended(
         body.sort(key=lambda g: score_play(g).combined)
         ordered = body + [finale]
         seq = score_sequence(ordered).combined
-        if seq >= best_seq or not picked:
+        filling = len(picked) < min_cap
+        if not picked or filling or seq >= best_seq - 0.08:
             picked = list(trial)
-            best_seq = seq
+            if seq >= best_seq:
+                best_seq = seq
+            elif filling and best_seq < 0:
+                best_seq = seq
     finale = max(picked, key=lambda g: (score_play(g).combined, _group_value(g))) if picked else None
     if finale is None:
         return []

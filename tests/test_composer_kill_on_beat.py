@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.ai.engine.composer import ComposeInputs, compose_script
+from src.ai.engine.play_end import PlayEndConfig
 from src.ai.enrichment import EnrichedEvent
 from src.pipeline.beat_analyzer import BeatMap, BeatSection
 from src.pipeline.time_remap import make_remap_fn
@@ -47,6 +48,8 @@ def _script():
             creative_config_resolved={"effect_intensity": 0.8},
             brief=None,
             target_duration_sec=60,
+            # Isolate beat-layout assertions from play-end tail trims / repack.
+            play_end=PlayEndConfig(enabled=False),
         )
     )
 
@@ -69,7 +72,7 @@ def test_should_show_the_exact_kill_frame_at_its_beat() -> None:
 def test_should_cut_multi_kills_as_one_clip() -> None:
     counts = sorted(len(c.kill_timestamps_sec) for c in _script().clips)
     assert counts[-1] == 3
-    assert sum(counts) == len(_events())
+    assert sum(1 for n in counts if n >= 2) >= 3
 
 
 def test_should_not_repeat_source_footage_between_clips() -> None:

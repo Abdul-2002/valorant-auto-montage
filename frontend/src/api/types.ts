@@ -13,6 +13,23 @@ export type TaskStatus = {
   detail: Record<string, unknown> | null;
 };
 
+export type TaskSummary = {
+  task_id: string;
+  song_name: string;
+  num_videos: number;
+  has_highlights: boolean;
+  has_selection: boolean;
+  has_script: boolean;
+  has_outputs: boolean;
+  num_highlights: number;
+  resume_path: string;
+  mtime: number;
+};
+
+export type TaskListResponse = {
+  tasks: TaskSummary[];
+};
+
 export type MountedFile = {
   name: string;
   path: string;

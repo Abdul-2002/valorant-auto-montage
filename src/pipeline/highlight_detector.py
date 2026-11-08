@@ -66,6 +66,40 @@ def _run_detector(det_name: str, ctx: DetectionContext, config: AppConfig) -> li
     return det_cls.from_config(det_cfg).detect(ctx)
 
 
+def _verify_kill_candidates(
+    *,
+    idx: int,
+    vp: Path,
+    assets_dir: Path,
+    config: AppConfig,
+    candidates: list[dict],
+) -> list[dict]:
+    """Layer B: Gemini short-clip accept/reject on kill candidates (YOLO or Gemini)."""
+    verify_cfg = getattr(config.detection, "gemini_kill_verify", None)
+    if not candidates or verify_cfg is None or not bool(getattr(verify_cfg, "enabled", False)):
+        return candidates
+    before = len(candidates)
+    try:
+        kept = _run_detector(
+            "gemini_kill_verify",
+            _build_ctx(idx, vp, assets_dir, config, extra={"_candidate_events": candidates}),
+            config,
+        )
+    except Exception:
+        log.exception(
+            "highlight_detector: gemini_kill_verify failed for video %d; keeping unverified candidates",
+            idx,
+        )
+        return candidates
+    log.warning(
+        "highlight_detector: gemini_kill_verify kept %d/%d for video %d",
+        len(kept),
+        before,
+        idx,
+    )
+    return kept
+
+
 def _run_active_detectors(
     *,
     idx: int,
@@ -74,11 +108,14 @@ def _run_active_detectors(
     config: AppConfig,
     active: list[str],
 ) -> tuple[list[dict], list[dict]]:
-    """Run listed detectors; split audio vs visual."""
+    """Run listed detectors; split audio vs visual; optionally verify kill candidates."""
     ctx = _build_ctx(idx, vp, assets_dir, config)
     visual: list[dict] = []
     audio: list[dict] = []
     for det_name in active:
+        if det_name == "gemini_kill_verify":
+            # Verify is a post-pass over candidates, not a primary detector.
+            continue
         try:
             events = _run_detector(det_name, ctx, config)
         except Exception:
@@ -88,6 +125,9 @@ def _run_active_detectors(
             audio.extend(events)
         else:
             visual.extend(events)
+    visual = _verify_kill_candidates(
+        idx=idx, vp=vp, assets_dir=assets_dir, config=config, candidates=visual
+    )
     return visual, audio
 
 
@@ -153,28 +193,17 @@ def _gemini_detection_pipeline(
         )
         gemini_events = []
 
-    verify_cfg = getattr(config.detection, "gemini_kill_verify", None)
-    if gemini_events and verify_cfg is not None and bool(getattr(verify_cfg, "enabled", False)):
-        before = len(gemini_events)
-        try:
-            gemini_events = _run_detector(
-                "gemini_kill_verify",
-                _build_ctx(idx, vp, assets_dir, config, extra={"_candidate_events": gemini_events}),
-                config,
-            )
-        except Exception:
-            log.exception("highlight_detector: gemini_kill_verify failed for video %d", idx)
-        log.warning(
-            "highlight_detector: gemini_kill_verify kept %d/%d for video %d",
-            len(gemini_events),
-            before,
-            idx,
-        )
+    gemini_events = _verify_kill_candidates(
+        idx=idx, vp=vp, assets_dir=assets_dir, config=config, candidates=gemini_events
+    )
 
     visual: list[dict] = []
     if not gemini_events:
         log.warning("highlight_detector: gemini empty for video %d; falling back to auto_gaming_yolo", idx)
         visual.extend(_run_detector("auto_gaming_yolo", ctx, config))
+        visual = _verify_kill_candidates(
+            idx=idx, vp=vp, assets_dir=assets_dir, config=config, candidates=visual
+        )
     else:
         try:
             import cv2
@@ -194,7 +223,12 @@ def _gemini_detection_pipeline(
                 "highlight_detector: gemini timestamps collapsed; falling back to auto_gaming_yolo (video %d)",
                 idx,
             )
-            visual.extend(_run_detector("auto_gaming_yolo", ctx, config))
+            yolo_events = _run_detector("auto_gaming_yolo", ctx, config)
+            visual.extend(
+                _verify_kill_candidates(
+                    idx=idx, vp=vp, assets_dir=assets_dir, config=config, candidates=yolo_events
+                )
+            )
         else:
             visual.extend(gemini_events)
 
