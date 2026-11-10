@@ -1,4 +1,5 @@
 from src.ai.schema import MontageScript, ScriptClip
+from src.config.loader import load_config
 from src.config.models import OverlaysConfig
 from src.effects.text_sprites import text_sprite, text_sprite_3d
 from src.pipeline.montage_overlays import build_overlay_plan
@@ -71,6 +72,13 @@ def test_should_extrude_title_sprite_beyond_flat_sprite() -> None:
     deep = text_sprite_3d("ACE", size=72, color=(255, 255, 255), depth_color=(26, 66, 85), glow=(80, 200, 255))
     assert deep.shape[0] > flat.shape[0] and deep.shape[1] > flat.shape[1]
     assert (deep[:, :, 3] > 0).sum() > (flat[:, :, 3] > 0).sum()
+
+
+def test_should_ship_without_title_or_engagement_cards() -> None:
+    cfg = load_config("config/default.yaml")
+    assert cfg.overlays.title_text == ""
+    assert cfg.overlays.engagement_captions is False
+    assert cfg.transitions.chorus_type == "hard_cut"
 
 
 def test_should_plan_like_subscribe_comment_without_thumbnail() -> None:

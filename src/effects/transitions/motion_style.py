@@ -81,8 +81,10 @@ def style_push_head(clip: Any, *, duration_sec: float) -> Any:
         shift = int(round(frame.shape[1] * (1.0 - u)))
         if shift <= 0:
             return frame
-        out = np.zeros_like(frame)
+        out = np.empty_like(frame)
         out[:, shift:] = frame[:, : frame.shape[1] - shift]
+        # Repeat the entering edge. A zero fill reads as a broken black slab.
+        out[:, :shift] = frame[:, :1]
         return out
 
     return clip.transform(transform)

@@ -103,6 +103,9 @@ export function SequencePlayer({
   const playingRef = useRef(false);
   const segRef = useRef<Segment | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [showMaster, setShowMaster] = useState(false);
+  const [masterMissing, setMasterMissing] = useState(false);
+  const masterSrc = `/montage/${encodeURIComponent(taskId)}/media/render`;
   const segments = useMemo(() => buildSegments(script), [script]);
   // Playback length follows the clip sequence (normalized). Do not let a stale
   // timeline duration inflate the scrubber past the last clip.
@@ -306,12 +309,27 @@ export function SequencePlayer({
       <div
         className="seq-preview"
         aria-label="Preview"
-        onClick={() => setPlaying((p) => !p)}
-        title="Click preview to play or pause"
+        onClick={() => {
+          if (!showMaster) setPlaying((p) => !p);
+        }}
+        title={showMaster ? "Rendered montage" : "Rough cut. Click to play or pause the source clips."}
       >
-        <div className="ai-placement-badge">AI placed — change anything</div>
+        <div className="ai-placement-badge">
+          {showMaster ? "Rendered master" : "Rough cut — effects are not shown"}
+        </div>
         <div className={`seq-stage ${inTransition ? "seq-stage-fx" : ""} ${isJigsaw ? "seq-stage-jigsaw" : ""}`}>
-          {videoSrc ? (
+          {showMaster ? (
+            <video
+              key={masterSrc}
+              src={masterSrc}
+              controls
+              playsInline
+              onError={() => {
+                setMasterMissing(true);
+                setShowMaster(false);
+              }}
+            />
+          ) : videoSrc ? (
             <video
               key={`v${activeSeg?.videoIndex ?? "x"}`}
               ref={videoRef}
@@ -323,8 +341,8 @@ export function SequencePlayer({
           ) : (
             <div className="muted">No clips in sequence</div>
           )}
-          <audio ref={audioRef} src={musicSrc} preload="auto" />
-          {isJigsaw ? (
+          {showMaster ? null : <audio ref={audioRef} src={musicSrc} preload="auto" />}
+          {!showMaster && isJigsaw ? (
             <div className="seq-jigsaw-overlay" aria-hidden>
               <div className="seq-jigsaw-pieces">
                 {[0, 1, 2, 3, 4, 5].map((n) => (
@@ -334,12 +352,12 @@ export function SequencePlayer({
               <div className="seq-jigsaw-caption">Puzzle cut</div>
             </div>
           ) : null}
-          {inTransition && !isJigsaw && activeSeg?.transition ? (
+          {!showMaster && inTransition && !isJigsaw && activeSeg?.transition ? (
             <div className={`seq-fx-banner seq-fx-${String(activeSeg.transition)}`}>
               <div className="seq-fx-banner-title">{transitionLabel(activeSeg.transition)}</div>
             </div>
           ) : null}
-          {inGunWindow ? (
+          {!showMaster && inGunWindow ? (
             <div className="seq-gun-outline" aria-hidden>
               <svg viewBox="0 0 200 120" className="seq-gun-svg">
                 <path
@@ -354,13 +372,15 @@ export function SequencePlayer({
               </svg>
             </div>
           ) : null}
-          {hits
-            .filter((h) => h.kind === "text")
-            .map((t, i) => (
-              <div key={`tx-${i}`} className="seq-text-overlay">
-                {t.label}
-              </div>
-            ))}
+          {!showMaster
+            ? hits
+                .filter((h) => h.kind === "text")
+                .map((t, i) => (
+                  <div key={`tx-${i}`} className="seq-text-overlay">
+                    {t.label}
+                  </div>
+                ))
+            : null}
         </div>
       </div>
 
@@ -408,13 +428,26 @@ export function SequencePlayer({
             <button className="btn transport-btn transport-fx" type="button" title="Next FX" onClick={() => seekNextFx()}>
               Next FX
             </button>
+            <button
+              className="btn transport-btn"
+              type="button"
+              title="Play the finished file. The window above is only the source clips."
+              onClick={() => {
+                setMasterMissing(false);
+                setPlaying(false);
+                setShowMaster((on) => !on);
+              }}
+            >
+              {showMaster ? "Rough cut" : "Rendered"}
+            </button>
           </div>
 
           </div>
           <label className="seq-scrub">
             <span className="seq-time">
-              {fmt(playheadSec)} / {fmt(duration)}
-              {activeSeg ? ` · Clip ${activeSeg.clipIndex + 1} · ${recipeLabel(activeSeg.recipe)}` : ""}
+              {showMaster ? "Finished file" : `${fmt(playheadSec)} / ${fmt(duration)}`}
+              {!showMaster && activeSeg ? ` · Clip ${activeSeg.clipIndex + 1} · ${recipeLabel(activeSeg.recipe)}` : ""}
+              {masterMissing ? " · Rendered file is not available" : ""}
             </span>
             <input
               type="range"

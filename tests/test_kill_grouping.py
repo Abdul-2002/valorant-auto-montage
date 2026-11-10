@@ -9,6 +9,7 @@ from src.ai.engine.kill_grouping import (
     group_kills,
     join_round_chains,
     move_finale_last,
+    split_spectating_markers,
     with_locked_finale,
 )
 from src.ai.enrichment import EnrichedEvent
@@ -31,6 +32,14 @@ def _ev(
         multi_kill_group_id=None,
         scoped=scoped,
     )
+
+
+def test_should_use_spectating_as_a_break_and_not_as_a_kill() -> None:
+    kills, marks = split_spectating_markers([_ev(10.0), _ev(12.0, event_type="spectating"), _ev(14.0)])
+    assert [e.event.timestamp_sec for e in kills] == [10.0, 14.0]
+    assert marks == [(0, 12.0)]
+    groups = build_play_flows([_ev(10.0), _ev(12.0, event_type="spectating"), _ev(14.0)], death_breaks=marks)
+    assert len(groups) == 2
 
 
 def test_should_merge_kills_within_burst_gap_into_one_group() -> None:

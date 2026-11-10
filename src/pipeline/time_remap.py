@@ -38,6 +38,22 @@ def slowmo_factor_for_source(*, target: float, source_fps: float, min_unique_fps
     return float(min(1.0, max(float(target), floor)))
 
 
+def slowmo_hold_sec(*, requested_sec: float, requested_factor: float, applied_factor: float) -> float:
+    """Shorten the slow hold when the speed was raised to the unique-frame floor.
+
+    Source time inside the hold stays ``requested_sec * requested_factor``. The
+    output hold shrinks, so the edit does not sit on repeated frames.
+    """
+    requested = float(requested_sec)
+    wanted = float(requested_factor)
+    applied = float(applied_factor)
+    if requested <= 0.0 or wanted <= 0.0 or applied <= 0.0:
+        return 0.0
+    if applied <= wanted + 1e-6:
+        return requested
+    return requested * wanted / applied
+
+
 def _slow_tail_knots(
     *,
     kill_out: float,

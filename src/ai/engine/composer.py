@@ -442,6 +442,7 @@ def _apply_play_end_boundary(clips: list[ScriptClip], inp: ComposeInputs) -> lis
         cfg=cfg,
         video_paths=paths or None,
         gemini_ends=gemini_ends or None,
+        death_marks=inp.death_breaks,
     )
     shortened = sum(
         1

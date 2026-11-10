@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.pipeline.time_remap import build_clip_remap, make_remap_fn, slowmo_factor_for_source
+from src.pipeline.time_remap import build_clip_remap, make_remap_fn, slowmo_factor_for_source, slowmo_hold_sec
 
 
 def _remap(**overrides):
@@ -53,6 +53,9 @@ def test_should_start_source_window_at_approach_speed_before_first_kill() -> Non
 def test_should_cap_slowmo_at_half_speed_when_source_is_60fps() -> None:
     assert slowmo_factor_for_source(target=0.4, source_fps=60.0, min_unique_fps=30.0) == 0.5
     assert slowmo_factor_for_source(target=0.4, source_fps=120.0, min_unique_fps=30.0) == 0.4
+    held = slowmo_hold_sec(requested_sec=0.9, requested_factor=0.4, applied_factor=0.5)
+    assert abs(held - 0.72) < 1e-9
+    assert slowmo_hold_sec(requested_sec=0.9, requested_factor=0.4, applied_factor=0.4) == 0.9
 
 
 def test_should_stay_monotonic_when_kill_is_near_end_of_video() -> None:

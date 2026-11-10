@@ -10,7 +10,7 @@ from src.ai.engine.kill_grouping import KillGroup
 from src.ai.schema import CreativeBrief, ScriptClip
 from src.config.models import VelocityEffectConfig
 from src.pipeline.beat_layout import ClipBeatPlan
-from src.pipeline.time_remap import build_clip_remap, slowmo_factor_for_source
+from src.pipeline.time_remap import build_clip_remap, slowmo_factor_for_source, slowmo_hold_sec
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,11 @@ def build_script_clip(
         target=target_factor,
         source_fps=group.source_fps,
         min_unique_fps=float(velocity.slowmo_min_unique_fps),
+    )
+    slow_sec = slowmo_hold_sec(
+        requested_sec=slow_sec,
+        requested_factor=target_factor,
+        applied_factor=factor,
     )
     kill_out_rel = [float(k) - plan.output_start_sec for k in plan.kill_output_sec]
     video_end = group.video_duration_sec if group.video_duration_sec > 0 else math.inf

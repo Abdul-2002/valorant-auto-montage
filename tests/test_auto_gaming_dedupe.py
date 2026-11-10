@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.detection.auto_gaming_yolo import dedupe_kill_detections
+from src.detection.auto_gaming_yolo import dedupe_kill_detections, should_emit_kill
 
 
 def _kill(ts: float, score: float = 0.9, video_index: int = 0, raw: str = "kill-1") -> dict:
@@ -14,6 +14,22 @@ def _kill(ts: float, score: float = 0.9, video_index: int = 0, raw: str = "kill-
         "source": "auto_gaming_yolo",
         "raw_class": raw,
     }
+
+
+def test_should_drop_kill_icon_while_spectating() -> None:
+    assert should_emit_kill(has_new_kill=True, spectating=True, guarded=False) is False
+    assert should_emit_kill(has_new_kill=True, spectating=False, guarded=False) is True
+    assert should_emit_kill(has_new_kill=True, spectating=False, guarded=True) is False
+
+
+def test_dedupe_keeps_spectating_marker_beside_kills() -> None:
+    raw = [
+        _kill(10.0),
+        {**_kill(12.0, score=0.6), "event_type": "spectating", "raw_class": "spectating"},
+    ]
+    out = dedupe_kill_detections(raw, gap_sec=1.0)
+    kinds = [d["event_type"] for d in out]
+    assert kinds == ["kill", "spectating"]
 
 
 def test_dedupe_collapses_kill1_kill2_flicker() -> None:

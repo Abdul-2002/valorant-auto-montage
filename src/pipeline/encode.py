@@ -63,3 +63,16 @@ def master_ffmpeg_params(cfg: OutputConfig, lut_path: Path | None) -> list[str]:
     if filters:
         params += ["-vf", filters]
     return params + ["-pix_fmt", "yuv420p"]
+
+
+def encode_ffmpeg_params(cfg: OutputConfig, lut_path: Path | None, *, codec: str) -> list[str]:
+    """Bitrate plus the finishing chain. NVENC needs ``-rc vbr`` or it ignores ``-b:v``."""
+    params = master_ffmpeg_params(cfg, lut_path)
+    if codec == "h264_nvenc":
+        return ["-rc", "vbr", *params]
+    return params
+
+
+def finishing_lut_replaces_clip_grade(cfg: OutputConfig) -> bool:
+    """The encode LUT is the grade. Stacking the per-clip HSV pass on top crushes highlights."""
+    return bool(cfg.lut) and float(cfg.lut_strength) > 0.0

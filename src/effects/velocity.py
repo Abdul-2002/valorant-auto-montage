@@ -7,7 +7,7 @@ from moviepy.video.VideoClip import VideoClip
 
 from src.effects.base import ClipEffect, EffectContext
 from src.effects.registry import register_clip_effect
-from src.pipeline.time_remap import make_remap_fn
+from src.pipeline.time_remap import make_remap_fn, slowmo_factor_for_source, slowmo_hold_sec
 
 
 def _ease_in_out_cubic(x: float) -> float:
@@ -44,11 +44,20 @@ class VelocityEffect(ClipEffect):
 
     def _centered_slowmo(self, clip: VideoClip, kill_t: float) -> VideoClip:
         """Fallback for scripts without knots: eased slow window around the kill."""
-        half = float(self.kill_slowmo_duration_sec) / 2.0
+        factor = slowmo_factor_for_source(
+            target=float(self.kill_slowmo_factor),
+            source_fps=float(getattr(clip, "fps", None) or 60.0),
+            min_unique_fps=float(self.slowmo_min_unique_fps),
+        )
+        hold = slowmo_hold_sec(
+            requested_sec=float(self.kill_slowmo_duration_sec),
+            requested_factor=float(self.kill_slowmo_factor),
+            applied_factor=factor,
+        )
+        half = hold / 2.0
         slow_start = max(0.0, kill_t - half)
         slow_end = min(float(clip.duration), kill_t + half)
         span = max(1e-9, slow_end - slow_start)
-        factor = float(self.kill_slowmo_factor)
         trans_speed = 1.0 if float(clip.duration or 0.0) <= 2.0 else float(self.transition_speedup_factor)
 
         def time_map(t: float) -> float:

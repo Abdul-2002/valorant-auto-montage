@@ -1,0 +1,20 @@
+# Ultralytics YOLO dataset config for Valorant kill-banner fine-tuning.
+# Keep class names and IDs identical to models/auto_gaming_valorant.pt
+# or auto_gaming_yolo class_mapping will break.
+
+# Path is relative to this file (portable: works from repo or E:\VALORANT\training).
+path: datasets/valorant_kill_banner
+train: images/train
+val: images/val
+
+names:
+  0: kill-1
+  1: kill-2
+  2: kill-3
+  3: kill-4
+  4: kill-5
+  5: kill-6
+  6: round-end
+  7: round-start
+  8: spectating
+  9: spike-plant

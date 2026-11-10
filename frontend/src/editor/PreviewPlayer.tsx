@@ -48,6 +48,19 @@ export function PreviewPlayer({ clip, src }: Props) {
         style={{
           position: "absolute",
           left: 12,
+          top: 12,
+          background: "rgba(0,0,0,0.65)",
+          padding: "6px 10px",
+          borderRadius: 6,
+          fontSize: 12,
+        }}
+      >
+        Rough cut — source clip only
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          left: 12,
           bottom: 12,
           background: "rgba(0,0,0,0.65)",
           padding: "6px 10px",

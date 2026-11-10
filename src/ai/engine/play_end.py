@@ -224,6 +224,16 @@ def collect_death_breaks(
     return breaks
 
 
+def _earliest_in_window(
+    marks: Sequence[tuple[int, float]],
+    video_index: int,
+    lo: float,
+    hi: float,
+) -> float | None:
+    hits = [float(t) for vi, t in marks if int(vi) == int(video_index) and lo < float(t) <= hi]
+    return min(hits) if hits else None
+
+
 def apply_play_end_to_clips(
     clips: Sequence[ScriptClip],
     *,
@@ -232,6 +242,7 @@ def apply_play_end_to_clips(
     round_ends: Sequence[tuple[int, float]] | None = None,
     gemini_ends: dict[tuple[int, float], float] | None = None,
     death_finder: Callable[..., float | None] | None = None,
+    death_marks: Sequence[tuple[int, float]] | None = None,
 ) -> list[ScriptClip]:
     """Layer 1 (+ optional L3 hints): clamp each clip, then repack the output bed."""
     if not cfg.enabled or not clips:
@@ -255,6 +266,14 @@ def apply_play_end_to_clips(
                 sample_fps=float(cfg.sample_fps),
                 confirm_frames=int(getattr(cfg, "death_confirm_frames", 2) or 2),
             )
+        yolo_death = _earliest_in_window(
+            death_marks or (),
+            int(clip.video_index),
+            last_kill + _MIN_POST_SEC,
+            last_kill + cap,
+        )
+        if yolo_death is not None:
+            death_sec = yolo_death if death_sec is None else min(death_sec, yolo_death)
         round_end = None
         for t in round_map.get(int(clip.video_index), []):
             if last_kill < t <= last_kill + cap:

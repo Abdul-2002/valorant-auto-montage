@@ -2,7 +2,7 @@
 
 const TRANSITION: Record<string, string> = {
   jigsaw: "Puzzle cut",
-  whip_pan: "Whip pan",
+  whip_pan: "Hard cut",
   push: "Push zoom",
   pop_slam: "Pop slam",
   flash_white: "White flash",

@@ -21,7 +21,7 @@ export function Review() {
 
   const clips = (script?.clips || []).filter((c) => c.enabled !== false);
   const timeline = script
-    ? buildTimelineFromScript(script, { titleText, songName, engagement: true })
+    ? buildTimelineFromScript(script, { titleText, songName, engagement: false })
     : null;
   const dur = clips.reduce((a, c) => {
     const s = c.output_start_sec ?? c.start_sec;

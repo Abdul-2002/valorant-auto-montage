@@ -396,6 +396,21 @@ def download(task_id: str, format: str = "16:9", storage_dir: Path = Depends(get
     return {"path": str(out)}
 
 
+@router.get("/{task_id}/media/render")
+def media_render(
+    task_id: str,
+    format: str = "16:9",
+    storage_dir: Path = Depends(get_storage_dir),
+) -> FileResponse:
+    """Stream a finished montage. The studio rough cut does not include grade, type, or transitions."""
+    tdir = _task_dir(storage_dir, task_id)
+    name = "montage_9x16.mp4" if format == "9:16" else "montage_16x9.mp4"
+    path = tdir / "outputs" / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Rendered montage is not ready")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+
 @router.get("/{task_id}/media/video/{video_index}")
 def media_video(task_id: str, video_index: int, storage_dir: Path = Depends(get_storage_dir)) -> FileResponse:
     """Stream a source VOD for studio preview."""

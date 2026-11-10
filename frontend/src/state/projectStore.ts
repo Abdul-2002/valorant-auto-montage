@@ -76,7 +76,7 @@ function rebuild(
   prev: TimelineProject | null,
   preserveStudio: boolean
 ): TimelineProject {
-  const next = buildTimelineFromScript(script, { titleText, songName, engagement: true });
+  const next = buildTimelineFromScript(script, { titleText, songName, engagement: false });
   if (!preserveStudio || !prev) return next;
   return {
     ...next,
@@ -107,7 +107,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   density: "standard",
   durationMode: "clip_driven",
   layout: "16:9",
-  titleText: "Lost SI",
+  titleText: "",
   songName: "",
   selectedIds: [],
   plays: [],

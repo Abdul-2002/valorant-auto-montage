@@ -7,10 +7,9 @@ from src.ai.schema import ScriptTransition
 from src.pipeline.beat_analyzer import BeatMap
 
 HIGH_ENERGY = frozenset({"chorus", "drop", "inst", "solo"})
-# zoom_in and spin have no assembler branch, so a chorus cut would be a raw join.
-_ENERGY_ROTATION = ("whip_pan", "pop_slam", "push", "pop_slam")
-# hard_cut is a raw concatenate, so calm sections use a short motion bridge instead.
-_CALM_ROTATION = ("whip_pan", "push", "whip_pan", "pop_slam")
+# whip_pan smears the frame and leaves a black slab. Straight cuts keep the beat grid.
+_ENERGY_ROTATION = ("hard_cut", "pop_slam", "push", "pop_slam")
+_CALM_ROTATION = ("hard_cut", "push", "hard_cut", "pop_slam")
 _DURATIONS = {
     "flash_white": 0.05,
     "whip_pan": 0.14,

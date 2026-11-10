@@ -71,7 +71,7 @@ export async function runAiMontageFromTask(
   const timeline = buildTimelineFromScript(script, {
     titleText: opts.titleText ?? "Lost SI",
     songName: opts.songName,
-    engagement: true,
+    engagement: false,
   });
   onProgress?.("Ready", 100);
   return { taskId, script, timeline };

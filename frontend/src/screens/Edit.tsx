@@ -69,7 +69,7 @@ export function Edit() {
           buildTimelineFromScript(next, {
             titleText,
             songName,
-            engagement: true,
+            engagement: false,
           })
         );
         setPlayheadSec(0);

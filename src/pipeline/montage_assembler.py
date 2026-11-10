@@ -23,7 +23,8 @@ from src.config.models import AppConfig
 from src.effects.base import EffectContext
 from src.effects.registry import get_audio_effect, get_clip_effect
 from src.io.audio_loader import load_audio_segment
-from src.io.ffmpeg import crop_center_9x16_from_16x9, video_quality_args
+from src.io.ffmpeg import crop_center_9x16_from_16x9
+from src.pipeline.encode import encode_ffmpeg_params, finishing_lut_replaces_clip_grade, resolve_lut
 from src.pipeline.clip_sequencer import SelectedClip, select_clips
 from src.pipeline.decoder_pool import DecoderPool
 from src.pipeline.types import DetectedEvent
@@ -255,6 +256,47 @@ def _extract_game_audio_from_clips(
     return out
 
 
+def _write_master(
+    clip: Any,
+    path: Path,
+    *,
+    fps: int,
+    codec: str,
+    config: AppConfig,
+    work_dir: Path,
+) -> None:
+    """Encode one master. Uses the configured bitrate and finishing LUT, then falls back."""
+    try:
+        lut_path = resolve_lut(config.output, work_dir)
+    except FileNotFoundError:
+        logger.exception("assembler: finishing LUT missing; encoding without it")
+        lut_path = None
+    encoders = [codec or "libx264"]
+    if encoders[0] != "libx264":
+        encoders.append("libx264")
+    attempts: list[tuple[str, Path | None]] = [(enc, lut_path) for enc in encoders]
+    if lut_path is not None:
+        attempts.append(("libx264", None))
+    last_error: OSError | None = None
+    for enc, lut in attempts:
+        preset = "p4" if enc == "h264_nvenc" else "medium"
+        try:
+            clip.write_videofile(
+                str(path),
+                fps=fps,
+                codec=enc,
+                audio_codec="aac",
+                preset=preset,
+                ffmpeg_params=encode_ffmpeg_params(config.output, lut, codec=enc),
+            )
+            return
+        except OSError as exc:
+            last_error = exc
+            logger.exception("assembler: encode failed codec=%s lut=%s", enc, lut is not None)
+    if last_error is not None:
+        raise last_error
+
+
 def render_montage(
     *,
     video_paths: list[Path],
@@ -383,6 +425,9 @@ def render_montage(
                 kill_timestamps=kill_outs,
             )
 
+            if finishing_lut_replaces_clip_grade(config.output) and i == 0:
+                logger.info("assembler: skipping per-clip HSV grade; the encode LUT is the grade")
+
             # Apply clip effects in configured order.
             # Time-domain contract: velocity retimes the clip, so it anchors on the
             # SOURCE kill offset (ctx.kill_timestamp) and maps it to beat_timestamp.
@@ -396,6 +441,8 @@ def render_montage(
                 else:
                     eff_cfg = getattr(config.effects, name).model_dump(mode="json") if hasattr(config.effects, name) else {}
                 if not eff_cfg or not eff_cfg.get("enabled", False):
+                    continue
+                if name == "color_grading" and finishing_lut_replaces_clip_grade(config.output):
                     continue
                 eff = get_clip_effect(name).from_config(eff_cfg)
                 anchor_kill = ctx.kill_timestamp
@@ -422,20 +469,17 @@ def render_montage(
         # CRITICAL: every transition must preserve the output timeline exactly.
         # Inserting flash frames or overlapping clips shifts all subsequent cuts off
         # the music beat grid (the audio runs on an absolute timeline). Flash
-        # transitions are rendered as a tint on the head of the next clip; whip/push
-        # are duration-preserving motion styles on clip tails/heads.
+        # transitions are a tint on the head of the next clip. A stored whip_pan
+        # is a straight cut: the smear left a black slab.
         from src.effects.transitions.jigsaw import FALLBACK_BEAT_SEC, load_piece_labels, style_jigsaw_tail
         from src.effects.transitions.motion_style import (
             style_pop_slam_head,
             style_push_head,
-            style_whip_head,
-            style_whip_tail,
             style_zigzag_head,
             style_zoom_settle_head,
         )
 
         flash_dur = max(0.02, float(config.transitions.flash_duration_sec))
-        whip_dur = max(0.05, float(getattr(config.transitions, "whip_duration_sec", 0.14) or 0.14))
         push_dur = max(0.05, float(getattr(config.transitions, "push_duration_sec", 0.12) or 0.12))
         pop_dur = 0.22
         jigsaw_settle_dur = 0.18
@@ -458,8 +502,8 @@ def render_montage(
                 elif t_name == "flash_black":
                     nxt = _tint_head(nxt, color=(0, 0, 0), duration_sec=flash_dur)
                 elif t_name == "whip_pan":
-                    nxt = style_whip_head(nxt, duration_sec=whip_dur if t_dur <= 0 else t_dur)
-                    whoosh_times_sec.append(sum(float(getattr(c, "duration", 0.0) or 0.0) for c in styled))
+                    # Stored scripts may still say whip. Render a straight cut.
+                    pass
                 elif t_name == "push":
                     nxt = style_push_head(nxt, duration_sec=push_dur if t_dur <= 0 else t_dur)
                 elif t_name == "jigsaw":
@@ -483,9 +527,7 @@ def render_montage(
                     t_out = config.transitions.default_type if config.transitions.enabled else "hard_cut"
                     t_out_dur = 0.0
                     t_out_asset = None
-                if t_out == "whip_pan":
-                    nxt = style_whip_tail(nxt, duration_sec=whip_dur if t_out_dur <= 0 else t_out_dur)
-                elif t_out == "jigsaw":
+                if t_out == "jigsaw":
                     nxt = style_jigsaw_tail(
                         nxt,
                         incoming_frame=clips[idx + 1].get_frame(0.0),
@@ -613,10 +655,13 @@ def render_montage(
             # Cold open: music_edit starts on the first downbeat at full energy.
             # Fade in so the montage does not slam the listener mid-attack.
             mixed = mixed.fade_in(800)
-            # Outro: fade audio out and video to black so the montage ends
-            # deliberately instead of stopping mid-phrase on a raw frame.
-            mixed = mixed.fade_out(1800)
-            assembled = _fade_tail_to_black(assembled, total_duration=assembled_dur, fade_sec=1.2)
+            # Outro length comes from output config. Hardcoded 1.8s/1.2s ignored those fields.
+            audio_fade_ms = int(round(float(config.output.audio_fade_out_sec) * 1000))
+            if audio_fade_ms > 0:
+                mixed = mixed.fade_out(audio_fade_ms)
+            video_fade = float(config.output.video_fade_out_sec)
+            if video_fade > 0.0:
+                assembled = _fade_tail_to_black(assembled, total_duration=assembled_dur, fade_sec=video_fade)
             mixed.export(str(tmp_audio), format="mp3")
             audio_clip = AudioFileClip(str(tmp_audio))
             assembled = _with_audio(assembled, audio_clip)
@@ -624,47 +669,46 @@ def render_montage(
         # Write outputs
         out_16 = out_dir / "montage_16x9.mp4"
         codec = config.output.codec or "libx264"
-        # NVENC requires an ffmpeg build with NVENC enabled; libx264 is a safe fallback.
-        try:
-            if codec == "h264_nvenc":
-                assembled.write_videofile(
-                    str(out_16),
-                    fps=fps,
-                    codec=codec,
-                    audio_codec="aac",
-                    preset="p4",
-                    ffmpeg_params=video_quality_args(codec),
-                )
-            else:
-                assembled.write_videofile(str(out_16), fps=fps, codec=codec, audio_codec="aac", preset="medium")
-        except OSError:
-            # Common failure: ffmpeg missing NVENC encoder inside container.
-            assembled.write_videofile(str(out_16), fps=fps, codec="libx264", audio_codec="aac", preset="medium")
+        _write_master(assembled, out_16, fps=fps, codec=codec, config=config, work_dir=out_dir)
 
         if "9:16" in config.output.formats:
             out_9 = out_dir / "montage_9x16.mp4"
             # Generate 9:16 from the already-rendered 16:9 via FFmpeg.
             # This avoids a second full MoviePy render (which would rerun Python-frame transforms).
             try:
-                crop_center_9x16_from_16x9(in_mp4=out_16, out_mp4=out_9, codec=codec, fps=fps)
+                crop_center_9x16_from_16x9(
+                    in_mp4=out_16,
+                    out_mp4=out_9,
+                    codec=codec,
+                    fps=fps,
+                    video_bitrate=config.output.vertical_bitrate,
+                )
             except Exception:
-                # Conservative fallback: keep behavior working even if ffmpeg crop fails.
+                logger.exception("assembler: vertical ffmpeg delivery failed; falling back to MoviePy scale")
                 target_w = int(h * 9 / 16)
                 cropped = _cropped(assembled, x_center=w // 2, y_center=h // 2, width=target_w, height=h)
+                cropped = _resized(cropped, w=1080, h=1920)
                 try:
-                    if codec == "h264_nvenc":
-                        cropped.write_videofile(
-                            str(out_9),
-                            fps=fps,
-                            codec=codec,
-                            audio_codec="aac",
-                            preset="p4",
-                            ffmpeg_params=video_quality_args(codec),
-                        )
-                    else:
-                        cropped.write_videofile(str(out_9), fps=fps, codec=codec, audio_codec="aac", preset="medium")
-                except OSError:
-                    cropped.write_videofile(str(out_9), fps=fps, codec="libx264", audio_codec="aac", preset="medium")
+                    _write_master(
+                        cropped,
+                        out_9,
+                        fps=fps,
+                        codec=codec,
+                        config=config.model_copy(
+                            update={
+                                "output": config.output.model_copy(
+                                    update={
+                                        "video_bitrate": config.output.vertical_bitrate,
+                                        "lut": None,
+                                        "sharpen": 0.0,
+                                        "grain": 0,
+                                        "vignette": False,
+                                    }
+                                )
+                            }
+                        ),
+                        work_dir=out_dir,
+                    )
                 finally:
                     _close_quietly(cropped)
 

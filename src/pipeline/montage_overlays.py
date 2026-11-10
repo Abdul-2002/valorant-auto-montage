@@ -229,7 +229,7 @@ def _event_alpha(rel: float, hold: float) -> tuple[float, float]:
 
 
 def _draw_texts(frame: np.ndarray, t: float, plan: OverlayPlan, font_path: str) -> np.ndarray:
-    from src.effects.text_sprites import composite, text_sprite, text_sprite_3d
+    from src.effects.text_sprites import composite, text_sprite
 
     h, w = frame.shape[:2]
     for ev in plan.texts:
@@ -239,12 +239,7 @@ def _draw_texts(frame: np.ndarray, t: float, plan: OverlayPlan, font_path: str) 
         color, glow, size, y_frac = _STYLE[ev.kind]
         if ev.kind == "burst":
             scale *= 1.08
-        if ev.kind == "title":
-            sprite = text_sprite_3d(
-                ev.text, size=size, color=color, depth_color=tuple(c // 3 for c in glow), glow=glow, font_path=font_path
-            )
-        else:
-            sprite = text_sprite(ev.text, size=size, color=color, glow=glow, font_path=font_path)
+        sprite = text_sprite(ev.text, size=size, color=color, glow=glow, font_path=font_path)
         frame = composite(
             frame,
             sprite,

@@ -143,7 +143,7 @@ export function MediaBin({
                       transition_to_next: on
                         ? { type: "jigsaw", duration_sec: 0.75 }
                         : clip.transition_to_next?.type === "jigsaw"
-                          ? { type: "whip_pan", duration_sec: 0.14 }
+                          ? null
                           : clip.transition_to_next,
                     })
                   }
@@ -188,7 +188,11 @@ export function MediaBin({
                 <label className="fx-field">
                   Next transition
                   <select
-                    value={clip.transition_to_next?.type || "hard_cut"}
+                    value={
+                      clip.transition_to_next?.type === "whip_pan"
+                        ? "hard_cut"
+                        : clip.transition_to_next?.type || "hard_cut"
+                    }
                     onChange={(e) => {
                       const type = e.target.value;
                       if (type === "hard_cut") {
@@ -201,8 +205,7 @@ export function MediaBin({
                   >
                     <option value="hard_cut">Hard cut</option>
                     <option value="jigsaw">Puzzle cut</option>
-                    <option value="whip_pan">Whip pan</option>
-                    <option value="push">Push zoom</option>
+                    <option value="push">Push</option>
                     <option value="pop_slam">Pop slam</option>
                     <option value="flash_white">White flash</option>
                   </select>

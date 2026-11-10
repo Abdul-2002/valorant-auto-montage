@@ -169,31 +169,30 @@ effects:
     intensity: 0.28
 
 overlays:
-  # Title-only mode: faux-3D intro title + light leaks/flares (reference look).
-  # Lyrics/callouts stay off — they were hurting the cut more than helping.
-  # Set title_text to your gamer tag; empty string renders no title.
+  # No opening title and no LIKE / SUBSCRIBE / COMMENT cards.
+  # Lyrics and per-kill callouts stay off — they were hurting the cut.
+  # Set title_text to a name only if you want a flat title. Empty renders none.
   enabled: true
   light_leaks: true
   light_leak_strength: 0.35
   flare_streaks: true
   flare_strength: 0.8
-  title_text: "Lost SI"
+  title_text: ""
   title_sec: 2.4
   song_credit: false
   per_kill_callouts: false
   multi_kill_callouts: false
   lyrics_overlays: false
-  # Mid + end: LIKE / SUBSCRIBE / COMMENT only (no THANKS / THUMBNAIL).
-  engagement_captions: true
-  engagement_mid_popins: true
-  engagement_outro: true
+  engagement_captions: false
+  engagement_mid_popins: false
+  engagement_outro: false
   engagement_hold_sec: 2.0
 
 transitions:
   enabled: true
   default_type: "hard_cut"
   beat_drop_type: "flash_white"
-  chorus_type: "whip_pan"
+  chorus_type: "hard_cut"
   verse_type: "hard_cut"
   flash_duration_sec: 0.05
   xfade_duration_sec: 0.2

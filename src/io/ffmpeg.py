@@ -39,24 +39,40 @@ def extract_audio_wav_mono(
     subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout_sec)
 
 
+# Phone delivery. A center crop of 1080p is ~608 px wide; scale it up to a real 1080x1920.
+VERTICAL_WIDTH = 1080
+VERTICAL_HEIGHT = 1920
+_VERTICAL_VF = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={VERTICAL_WIDTH}:{VERTICAL_HEIGHT}:flags=lanczos"
+
+
+def _vertical_rate_args(codec: str, video_bitrate: str | None) -> list[str]:
+    if not video_bitrate:
+        return video_quality_args(codec)
+    from src.pipeline.encode import rate_args
+
+    args = rate_args(video_bitrate)
+    if codec == "h264_nvenc":
+        return ["-rc", "vbr", *args]
+    return args
+
+
 def crop_center_9x16_from_16x9(
     in_mp4: Path,
     out_mp4: Path,
     *,
     codec: str = "libx264",
     fps: int | None = None,
+    video_bitrate: str | None = None,
     timeout_sec: int = 60 * 60,
 ) -> None:
     """
-    Create a 9:16 center crop from a 16:9 input using FFmpeg.
+    Center-crop a 16:9 master to 9:16 and scale to 1080x1920.
 
     This intentionally runs as a separate FFmpeg encode rather than re-rendering the
     full MoviePy graph, which avoids a second pass through Python frame transforms.
+    The master already carries the LUT, so this pass only crops, scales, and rates.
     """
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
-
-    # width = ih*9/16, height = ih, x centered, y=0
-    vf = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
 
     cmd: list[str] = [resolve_ffmpeg_exe(), "-y", "-i", str(in_mp4)]
     if fps is not None:
@@ -64,10 +80,10 @@ def crop_center_9x16_from_16x9(
 
     cmd += [
         "-vf",
-        vf,
+        _VERTICAL_VF,
         "-c:v",
         codec,
-        *video_quality_args(codec),
+        *_vertical_rate_args(codec, video_bitrate),
         "-c:a",
         "aac",
         "-movflags",

@@ -18,6 +18,11 @@ def _norm_name(name: str) -> str:
     return "".join(str(name).lower().split())
 
 
+def should_emit_kill(*, has_new_kill: bool, spectating: bool, guarded: bool) -> bool:
+    """A killfeed icon during spectating is someone else's frag, not a montage kill."""
+    return bool(has_new_kill) and not spectating and not guarded
+
+
 def dedupe_kill_detections(
     detections: list[dict[str, Any]],
     *,
@@ -118,8 +123,8 @@ class AutoGamingYoloDetector(Detector):
         x2p, y2p = int(w * x2), int(h * y2)
         return frame[y1p:y2p, x1p:x2p], x1p, y1p
 
-    def _kill_classes_in_frame(self, model: Any, frame: Any) -> dict[str, tuple[float, list[float]]]:
-        """Return {raw_class: (conf, bbox)} for kill classes above presence_conf."""
+    def _mapped_classes_in_frame(self, model: Any, frame: Any) -> dict[str, tuple[float, list[float], str]]:
+        """Return {raw_class: (conf, bbox, mapped_type)} for every known class above presence_conf."""
         infer_frame, off_x, off_y = self._crop_region(frame)
         conf_floor = min(float(self.presence_conf), float(self.confidence_threshold))
         # half=True on CPU is deprecated and can silently degrade Ultralytics predicts.
@@ -136,14 +141,15 @@ class AutoGamingYoloDetector(Detector):
             results = model.predict(infer_frame, conf=conf_floor, verbose=False)
 
         boxes = results[0].boxes if results else None
-        out: dict[str, tuple[float, list[float]]] = {}
+        out: dict[str, tuple[float, list[float], str]] = {}
         if boxes is None or len(boxes) == 0:
             return out
 
         names = getattr(model, "names", {}) or {}
         for box in boxes:
             raw = _norm_name(str(names.get(int(box.cls[0]), f"class_{int(box.cls[0])}")))
-            if self._mapping_norm.get(raw) != "kill":
+            mapped = self._mapping_norm.get(raw)
+            if mapped is None:
                 continue
             conf = float(box.conf[0])
             if raw not in out or conf > out[raw][0]:
@@ -151,8 +157,17 @@ class AutoGamingYoloDetector(Detector):
                 out[raw] = (
                     conf,
                     [float(x1b + off_x), float(y1b + off_y), float(x2b + off_x), float(y2b + off_y)],
+                    mapped,
                 )
         return out
+
+    def _kill_classes_in_frame(self, model: Any, frame: Any) -> dict[str, tuple[float, list[float]]]:
+        """Return {raw_class: (conf, bbox)} for kill classes above presence_conf."""
+        return {
+            raw: (conf, bbox)
+            for raw, (conf, bbox, mapped) in self._mapped_classes_in_frame(model, frame).items()
+            if mapped == "kill"
+        }
 
     def _refine_appearance_frame(
         self, cap: Any, model: Any, raw_class: str, hit_frame: int, step: int
@@ -195,8 +210,12 @@ class AutoGamingYoloDetector(Detector):
 
         # Pass 1: sampled scan, emit on rising edges only.
         candidates: list[dict[str, Any]] = []
+        state_hits: list[dict[str, Any]] = []
         prev_present: set[str] = set()
+        prev_spectating = False
         last_kill_emit_sec: float | None = None
+        last_spec_emit_sec: float | None = None
+        suppressed = 0
         frame_idx = 0
         try:
             while True:
@@ -207,7 +226,12 @@ class AutoGamingYoloDetector(Detector):
                     frame_idx += 1
                     continue
 
-                present = self._kill_classes_in_frame(model, frame)
+                seen = self._mapped_classes_in_frame(model, frame)
+                present = {raw: (conf, bbox) for raw, (conf, bbox, mapped) in seen.items() if mapped == "kill"}
+                spectating = any(
+                    mapped == "game_state" and conf >= float(self.presence_conf)
+                    for conf, _bbox, mapped in seen.values()
+                )
                 t_sec = float(frame_idx / fps)
                 # One emission per sampled frame even if multiple kill-* classes rise.
                 new_kills = [
@@ -215,18 +239,36 @@ class AutoGamingYoloDetector(Detector):
                     for raw, (conf, bbox) in present.items()
                     if raw not in prev_present and conf >= float(self.confidence_threshold)
                 ]
-                if new_kills:
-                    guarded = (
-                        last_kill_emit_sec is not None
-                        and (t_sec - last_kill_emit_sec) <= float(self.reemit_guard_sec)
+                guarded = (
+                    last_kill_emit_sec is not None
+                    and (t_sec - last_kill_emit_sec) <= float(self.reemit_guard_sec)
+                )
+                if should_emit_kill(has_new_kill=bool(new_kills), spectating=spectating, guarded=guarded):
+                    raw, conf, bbox = max(new_kills, key=lambda x: float(x[1]))
+                    candidates.append({"frame": frame_idx, "raw": raw, "conf": conf, "bbox": bbox})
+                    last_kill_emit_sec = t_sec
+                elif new_kills and spectating and not guarded:
+                    suppressed += 1
+                if spectating and not prev_spectating:
+                    spec_guarded = (
+                        last_spec_emit_sec is not None
+                        and (t_sec - last_spec_emit_sec) <= float(self.reemit_guard_sec)
                     )
-                    if not guarded:
-                        raw, conf, bbox = max(new_kills, key=lambda x: float(x[1]))
-                        candidates.append(
-                            {"frame": frame_idx, "raw": raw, "conf": conf, "bbox": bbox}
+                    if not spec_guarded:
+                        best = max(
+                            (
+                                (conf, bbox)
+                                for conf, bbox, mapped in seen.values()
+                                if mapped == "game_state"
+                            ),
+                            key=lambda item: float(item[0]),
+                            default=None,
                         )
-                        last_kill_emit_sec = t_sec
+                        if best is not None and float(best[0]) >= float(self.confidence_threshold):
+                            state_hits.append({"frame": frame_idx, "conf": best[0], "bbox": best[1]})
+                            last_spec_emit_sec = t_sec
                 prev_present = set(present.keys())
+                prev_spectating = spectating
                 frame_idx += 1
 
             # Pass 2: refine each candidate to the exact appearance frame.
@@ -253,16 +295,29 @@ class AutoGamingYoloDetector(Detector):
                     "raw_class": str(cand["raw"]),
                 }
             )
+        for hit in state_hits:
+            detections.append(
+                {
+                    "video_index": ctx.video_index,
+                    "timestamp_sec": float(hit["frame"]) / fps,
+                    "score": float(min(1.0, float(hit["conf"]))),
+                    "event_type": "spectating",
+                    "source": "auto_gaming_yolo",
+                    "bbox": hit["bbox"],
+                    "raw_class": "spectating",
+                }
+            )
         before = len(detections)
         detections = dedupe_kill_detections(
             detections, gap_sec=float(self.kill_dedupe_gap_sec)
         )
-        detections.sort(key=lambda d: d["timestamp_sec"])
+        detections.sort(key=lambda d: (int(d.get("video_index", 0)), float(d["timestamp_sec"])))
 
         log.info(
-            "auto_gaming_yolo: events=%d (raw=%d) video=%s",
+            "auto_gaming_yolo: events=%d (raw=%d suppressed_spectator_kills=%d) video=%s",
             len(detections),
             before,
+            suppressed,
             ctx.video_path,
         )
         return detections

@@ -9,6 +9,7 @@ from typing import Any
 from src.ai.enrichment import enrich_events
 from src.ai.engine.composer import ComposeInputs, compose_script
 from src.ai.engine.kill_grouping import build_play_flows
+from src.ai.engine.kill_grouping import split_spectating_markers
 from src.ai.engine.play_end import PlayEndConfig, collect_death_breaks
 from src.ai.engine.recommend import resolve_locked_plays
 from src.ai.play_labels import label_play_groups
@@ -46,26 +47,28 @@ def generate_montage_script(
         if getattr(config.effects, "play_end", None) is not None
         else {}
     )
+    enriched, spectating_marks = split_spectating_markers(enriched)
+    if spectating_marks:
+        log.info("director: yolo spectating marks=%d", len(spectating_marks))
+
     kill_times: dict[int, list[float]] = {}
     for ev in enriched:
         kill_times.setdefault(int(ev.event.video_index), []).append(float(ev.event.timestamp_sec))
 
-    death_breaks: tuple[tuple[int, float], ...] = ()
+    death_breaks: tuple[tuple[int, float], ...] = tuple(spectating_marks)
     # Studio selections were built from unsplit plays. Re-scanning death between
     # kills rewrites play_ids, drops multis, and makes compose crawl on OneDrive.
     if play_end_cfg.enabled and not selected_play_ids:
         try:
-            death_breaks = tuple(
-                collect_death_breaks(
-                    kill_times_by_video=kill_times,
-                    video_paths=video_paths,
-                    cfg=play_end_cfg,
-                )
+            scanned = collect_death_breaks(
+                kill_times_by_video=kill_times,
+                video_paths=video_paths,
+                cfg=play_end_cfg,
             )
+            death_breaks = tuple(sorted({*death_breaks, *scanned}))
             log.info("director: death_breaks=%d", len(death_breaks))
         except Exception:
-            log.exception("director: death-break scan failed; continuing without breaks")
-            death_breaks = ()
+            log.exception("director: death-break scan failed; keeping YOLO spectating marks only")
     elif selected_play_ids:
         log.info("director: skipping death-break regroup; studio selection present")
 

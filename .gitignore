@@ -65,6 +65,19 @@ frontend/*.local
 models/*
 !models/.gitkeep
 
+# local YOLO fine-tune data + runs (keep scaffolding via .gitkeep / docs)
+training/datasets/**/images/**
+training/datasets/**/labels/**
+training/datasets/raw/**
+!training/datasets/**/.gitkeep
+!training/datasets/**/images/**/.gitkeep
+!training/datasets/**/labels/**/.gitkeep
+!training/datasets/raw/**/.gitkeep
+!training/datasets/raw/**/*.md
+!training/datasets/raw/SOURCES.md
+training/runs/
+training/weights/*.pt
+
 # OS / IDE
 .DS_Store
 Thumbs.db

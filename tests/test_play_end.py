@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.ai.engine.play_end import (
     PlayEndConfig,
+    apply_play_end_to_clips,
     apply_source_and_output_end,
     crosses_death_break,
     recipe_max_post_sec,
@@ -50,6 +51,17 @@ def test_should_clamp_to_recipe_cap_when_no_death() -> None:
     cfg = PlayEndConfig()
     end = resolve_play_end_sec(last_kill_sec=10.0, recipe="punch", cfg=cfg)
     assert abs(end - (10.0 + cfg.punch_max_post_sec)) < 1e-6
+
+
+def test_should_end_clip_at_yolo_spectating_mark() -> None:
+    clip = _clip(start=8.0, end=14.0, last_kill=10.0, out_start=0.0, out_end=6.0, kill_out=2.0, recipe="slow")
+    trimmed = apply_play_end_to_clips(
+        [clip],
+        cfg=PlayEndConfig(),
+        death_finder=lambda *_a, **_k: None,
+        death_marks=[(0, 10.4)],
+    )
+    assert abs(trimmed[0].end_sec - (10.4 - PlayEndConfig().death_pad_sec)) < 1e-6
 
 
 def test_should_cut_before_death_when_earlier_than_cap() -> None:

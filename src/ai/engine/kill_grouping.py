@@ -101,6 +101,27 @@ class KillGroup:
         )
 
 
+_NON_KILL_TYPES = frozenset({"spectating", "game_state", "round_boundary", "objective", "audio_peak"})
+_SPECTATOR_TYPES = frozenset({"spectating", "game_state"})
+
+
+def split_spectating_markers(
+    events: Sequence[EnrichedEvent],
+) -> tuple[list[EnrichedEvent], list[tuple[int, float]]]:
+    """Pull YOLO spectating stamps out of the kill list and return them as break times."""
+    kills: list[EnrichedEvent] = []
+    marks: list[tuple[int, float]] = []
+    for ev in events:
+        kind = str(ev.event.event_type or "kill").lower().replace(" ", "_").replace("-", "_")
+        if kind in _SPECTATOR_TYPES:
+            marks.append((int(ev.event.video_index), float(ev.event.timestamp_sec)))
+            continue
+        if kind in _NON_KILL_TYPES:
+            continue
+        kills.append(ev)
+    return kills, marks
+
+
 def _breaks_for_video(death_breaks: Sequence[tuple[int, float]] | None, video_index: int) -> tuple[float, ...]:
     if not death_breaks:
         return ()
@@ -357,5 +378,6 @@ def build_play_flows(
     death_breaks: Sequence[tuple[int, float]] | None = None,
 ) -> list[KillGroup]:
     """Detector events → continuous plays (singles, sprays, full ace/quadra runs)."""
-    clean = collapse_killfeed_flicker(events, near_dup_sec=near_dup_sec)
+    kills, _marks = split_spectating_markers(events)
+    clean = collapse_killfeed_flicker(kills, near_dup_sec=near_dup_sec)
     return join_round_chains(group_kills(clean, death_breaks=death_breaks), death_breaks=death_breaks)

@@ -51,7 +51,7 @@ export function buildTimelineFromScript(
   ];
 
   const text: TimelineOverlay[] = [];
-  const title = (opts.titleText || "Lost SI").trim();
+  const title = (opts.titleText || "").trim();
   if (title) {
     text.push({
       id: "title",
@@ -63,7 +63,7 @@ export function buildTimelineFromScript(
       color: "#ff4655",
     });
   }
-  if (opts.engagement !== false && duration > 8) {
+  if (opts.engagement === true && duration > 8) {
     const mid = duration * 0.45;
     text.push({
       id: "engage-mid",

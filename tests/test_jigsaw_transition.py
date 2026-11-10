@@ -20,6 +20,7 @@ from src.effects.transitions.jigsaw import (
 )
 from src.effects.transitions.motion_style import (
     style_pop_slam_head,
+    style_push_head,
     style_zigzag_head,
     style_zoom_settle_head,
 )
@@ -168,11 +169,18 @@ def test_should_skip_scene_jigsaw_when_next_kill_is_same_round() -> None:
     assert scene_jigsaw_slots(kinds, sources) == {1}
 
 
-def test_should_bridge_calm_cuts_instead_of_a_raw_hard_cut() -> None:
+def test_should_use_straight_cuts_instead_of_a_black_edged_whip() -> None:
     plan = plan_transitions(num_clips=5, beat_map=None, flash_frequency=0.0, beat_interval_sec=0.4)
     kinds = [t.type for t in plan.transitions_to_next[:-1]]
-    assert "hard_cut" not in kinds
-    assert kinds[:3] == ["whip_pan", "push", "whip_pan"]
+    assert "whip_pan" not in kinds
+    assert kinds[:3] == ["hard_cut", "push", "hard_cut"]
+
+
+def test_should_keep_the_push_edge_instead_of_a_black_slab() -> None:
+    frame = _solid(IN_RGB)
+    clip = _FakeClip([frame])
+    styled = style_push_head(clip, duration_sec=0.5)
+    assert not np.all(styled._frames[0][:, :40] == 0)
 
 
 def test_should_size_jigsaws_to_one_beat_and_add_scene_jigsaws_only_in_reference_style() -> None:

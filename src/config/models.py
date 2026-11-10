@@ -82,7 +82,7 @@ class TransitionsConfig(BaseModel):
     enabled: bool = True
     default_type: str = "hard_cut"
     beat_drop_type: str = "flash_white"
-    chorus_type: str = "whip_pan"
+    chorus_type: str = "hard_cut"
     verse_type: str = "hard_cut"
     flash_duration_sec: float = Field(gt=0.0, lt=2.0, default=0.05)
     xfade_duration_sec: float = Field(gt=0.0, lt=5.0, default=0.2)
