@@ -123,22 +123,40 @@ class AutoGamingYoloDetector(Detector):
         x2p, y2p = int(w * x2), int(h * y2)
         return frame[y1p:y2p, x1p:x2p], x1p, y1p
 
-    def _mapped_classes_in_frame(self, model: Any, frame: Any) -> dict[str, tuple[float, list[float], str]]:
-        """Return {raw_class: (conf, bbox, mapped_type)} for every known class above presence_conf."""
-        infer_frame, off_x, off_y = self._crop_region(frame)
-        conf_floor = min(float(self.presence_conf), float(self.confidence_threshold))
-        # half=True on CPU is deprecated and can silently degrade Ultralytics predicts.
+    def _predict_device(self) -> tuple[int | str, bool]:
+        """Resolve YOLO device once per detector instance (not per frame)."""
+        cached = getattr(self, "_predict_device_cache", None)
+        if cached is not None:
+            return cached
+        device: int | str = "cpu"
         use_half = False
         try:
             import torch
 
-            use_half = bool(torch.cuda.is_available())
-        except Exception:
+            if torch.cuda.is_available():
+                device = 0
+                use_half = True
+        except (ImportError, RuntimeError) as exc:
+            log.warning("auto_gaming_yolo: CUDA unavailable, using CPU (%s)", exc)
+            device = "cpu"
             use_half = False
+        self._predict_device_cache = (device, use_half)
+        return self._predict_device_cache
+
+    def _mapped_classes_in_frame(self, model: Any, frame: Any) -> dict[str, tuple[float, list[float], str]]:
+        """Return {raw_class: (conf, bbox, mapped_type)} for every known class above presence_conf."""
+        infer_frame, off_x, off_y = self._crop_region(frame)
+        conf_floor = min(float(self.presence_conf), float(self.confidence_threshold))
+        # Explicit device=0 matches yolo_kill_feed; without it Ultralytics can stay on CPU
+        # even when torch.cuda.is_available() is True after late GPU lib injection.
+        device, use_half = self._predict_device()
         try:
-            results = model.predict(infer_frame, conf=conf_floor, verbose=False, half=use_half)
+            results = model.predict(
+                infer_frame, conf=conf_floor, verbose=False, half=use_half, device=device
+            )
         except TypeError:
-            results = model.predict(infer_frame, conf=conf_floor, verbose=False)
+            log.debug("auto_gaming_yolo: half= unsupported; retrying without it", exc_info=True)
+            results = model.predict(infer_frame, conf=conf_floor, verbose=False, device=device)
 
         boxes = results[0].boxes if results else None
         out: dict[str, tuple[float, list[float], str]] = {}

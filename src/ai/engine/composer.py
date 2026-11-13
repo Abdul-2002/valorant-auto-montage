@@ -11,7 +11,7 @@ from src.ai.enrichment import EnrichedEvent
 from src.ai.engine.arc_modeler import assign_arc_phases
 from src.ai.engine.clip_planner import ClipDirection, build_script_clip
 from src.ai.engine.effect_mapper import VALID_RECIPES, assign_glitter_variants, assign_hit_styles, assign_recipes
-from src.ai.engine.feature_budget import assign_features
+from src.ai.engine.feature_budget import assign_features, glitter_slots
 from src.ai.engine.flow_scoring import pick_recommended
 from src.ai.engine.kill_grouping import (
     HOLD_SCORE,
@@ -370,13 +370,17 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
         directed=directed_styles,
         style_fx=str(inp.creative_config_resolved.get("style_fx", "")),
     )
+    kill_counts = [len(g.events) for g in groups]
+    group_scores = [g.score for g in groups]
+    glitter_idx = glitter_slots(kill_counts=kill_counts, scores=group_scores)
     glitter = assign_glitter_variants(len(groups))
     features = assign_features(
         recipes=recipes,
-        kill_counts=[len(g.events) for g in groups],
-        scores=[g.score for g in groups],
+        kill_counts=kill_counts,
+        scores=group_scores,
         style_fx=str(inp.creative_config_resolved.get("style_fx", "")),
     )
+    interval = beat_interval(inp.beat_map, float(inp.target_duration_sec))
     clips = [
         build_script_clip(
             group=g,
@@ -389,11 +393,12 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
                 ghost_candidate=features[i].ghost_candidate,
                 gun_candidate=features[i].gun_candidate,
                 accent_beats=tuple(_accent_beats(inp.beat_map, p)),
-                glitter_variant=glitter[i],
+                glitter_variant=glitter[i] if i in glitter_idx else "",
             ),
             velocity=inp.velocity,
             creative_config=inp.creative_config_resolved,
             brief=inp.brief,
+            beat_sec=float(interval),
         )
         for i, (g, p) in enumerate(zip(groups, plans))
     ]
@@ -409,6 +414,11 @@ def compose_script(inp: ComposeInputs) -> MontageScript:
     )
     clips = _apply_play_end_boundary(clips, inp)
     clips = _with_transitions(clips, inp)
+    from src.ai.engine.pacing import enforce_transition_settle
+    from src.ai.engine.play_end import repack_output_timeline
+
+    clips = enforce_transition_settle(clips)
+    clips = repack_output_timeline(clips)
     return MontageScript(
         clips=clips or [ScriptClip(video_index=0, start_sec=0.0, end_sec=0.05, kill_timestamp_sec=0.0, score=0.0)],
         creative_config_resolved=dict(inp.creative_config_resolved),
@@ -444,15 +454,10 @@ def _apply_play_end_boundary(clips: list[ScriptClip], inp: ComposeInputs) -> lis
         gemini_ends=gemini_ends or None,
         death_marks=inp.death_breaks,
     )
-    shortened = sum(
-        1
-        for a, b in zip(clips, trimmed)
-        if float(b.end_sec) + 1e-3 < float(a.end_sec) or float(b.output_end_sec or 0) + 1e-3 < float(a.output_end_sec or 0)
-    )
     logger.info(
-        "composer: play_end trimmed %d/%d clips (gemini_hints=%d)",
-        shortened,
+        "composer: play_end kept %d/%d clips (gemini_hints=%d)",
         len(trimmed),
+        len(clips),
         len(gemini_ends),
     )
     return trimmed

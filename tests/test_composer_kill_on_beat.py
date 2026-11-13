@@ -54,12 +54,37 @@ def _script():
     )
 
 
+def _trimmed_script():
+    return compose_script(
+        ComposeInputs(
+            enriched_events=_events(),
+            beat_map=_beat_map(),
+            creative_config_resolved={"effect_intensity": 0.8},
+            brief=None,
+            target_duration_sec=60,
+            play_end=PlayEndConfig(enabled=True, gemini_enabled=False),
+        )
+    )
+
+
+def _on_beat(t: float) -> bool:
+    return min(abs(t - b) for b in _beat_map().beat_times) < 1e-6
+
+
 def test_should_place_every_kill_on_a_beat() -> None:
-    beats = _beat_map().beat_times
     for clip in _script().clips:
         for rel in clip.kill_output_times_sec:
-            t = float(clip.output_start_sec) + rel
-            assert min(abs(t - b) for b in beats) < 1e-6
+            assert _on_beat(float(clip.output_start_sec) + rel)
+
+
+def test_should_keep_cuts_and_kills_on_beats_when_play_end_trims_tails() -> None:
+    clips = _trimmed_script().clips
+    for a, b in zip(clips, clips[1:]):
+        assert abs(float(a.output_end_sec) - float(b.output_start_sec)) < 1e-9
+    for clip in clips:
+        assert _on_beat(float(clip.output_start_sec))
+        for rel in clip.kill_output_times_sec:
+            assert _on_beat(float(clip.output_start_sec) + rel)
 
 
 def test_should_show_the_exact_kill_frame_at_its_beat() -> None:

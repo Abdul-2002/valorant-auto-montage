@@ -19,14 +19,15 @@ STRONG_ACCENT_ABS: float = 0.55
 STRONG_ACCENT_PERCENTILE: float = 70.0
 
 # Output run-up before the first kill of a clip, in beats.
+# ~2–4 beats ≈ 0.9–1.6s at 120–150 BPM — setup visible, then pacing.cap_pre_roll snaps.
 PRE_BEATS_MIN: int = 2
-PRE_BEATS_TARGET: int = 4
+PRE_BEATS_TARGET: int = 3
 PRE_BEATS_MAX: int = 4
 # Beats between the last kill of one clip and the first kill of the next.
 GAP_BEATS_MIN: int = 4
 GAP_BEATS_MAX: int = 10
-# Room after the last kill for the post-kill slow-mo + exit.
-POST_BEATS_MIN: int = 2
+# Room after the last kill for settle + slow-mo + exit (feeds jigsaw settle).
+POST_BEATS_MIN: int = 3
 # Playback speed assumed when converting source gaps to beat counts.
 NOMINAL_SPEED: float = 1.1
 MULTI_KILL_SPEED_RANGE: tuple[float, float] = (0.7, 1.9)

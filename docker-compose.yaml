@@ -61,6 +61,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # WSL2 GPU: Docker CDI/--gpus is broken here ("no known GPU vendor").
+    # Microsoft WSL path: /dev/dxg + /usr/lib/wsl libs enables CUDA + NVENC.
+    devices:
+      - /dev/dxg
     environment:
       - REDIS_BROKER_URL=redis://redis:6379/0
       - REDIS_BACKEND_URL=redis://redis:6379/1
@@ -72,6 +76,9 @@ services:
       - YOUTUBE_OAUTH_REDIRECT_URI=${YOUTUBE_OAUTH_REDIRECT_URI:-http://127.0.0.1:8000/youtube/callback}
       - MONTAGE_VIDEO_ROOTS=/videos:/videos_ext
       - MONTAGE_SONG_ROOTS=/songs:/songs_ext
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - NVIDIA_VISIBLE_DEVICES=all
     command:
       [
         "celery",
@@ -89,6 +96,7 @@ services:
       - ./videos:/videos:ro
       - /mnt/c/Users/aasid/Music:/songs_ext:ro
       - /mnt/d/Videos/Valorant:/videos_ext:ro
+      - /usr/lib/wsl:/usr/lib/wsl:ro
       - ./client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:/app/client_secret_326113395181-bjo6vrh2lkvm6hfitcbq4ft1p3vli2im.apps.googleusercontent.com.json:ro
     depends_on:
       redis:

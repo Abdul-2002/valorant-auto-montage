@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 # Never cut so tight that the kill frame itself is dropped.
 _MIN_POST_SEC: float = 0.05
+# A tail shorter than this is a smash onto a death screen, not a hold. Drop the clip.
+MIN_KEEP_SETTLE_SEC: float = 0.8
 
 # Public alias used by tests and call sites.
 PlayEndConfig = PlayEndEffectConfig
@@ -224,6 +226,37 @@ def collect_death_breaks(
     return breaks
 
 
+def output_settle_sec(clip: ScriptClip) -> float:
+    """Seconds of output after the last kill accent."""
+    kills = list(clip.kill_output_times_sec or [])
+    last_out = float(kills[-1]) if kills else 0.0
+    dur = float(clip.output_end_sec or 0.0) - float(clip.output_start_sec or 0.0)
+    return dur - last_out
+
+
+def frame_is_death(video_path: Path, t_sec: float) -> bool:
+    """True when the source frame at ``t_sec`` is a death cam or combat report."""
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        logger.warning("play_end: cannot open %s for death-screen check", video_path)
+        return False
+    try:
+        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t_sec)) * 1000.0)
+        ok, frame = cap.read()
+        return bool(ok and frame is not None and is_death_or_spectator_frame(frame))
+    finally:
+        cap.release()
+
+
+def clip_opens_on_death_screen(clip: ScriptClip, video_path: Path) -> bool:
+    """True when the cut-in is already a death cam or combat report.
+
+    The kill stamp is not checked. The kill feed sits inside the combat-report
+    region, so a live frag false-positives there and the whole play gets deleted.
+    """
+    return frame_is_death(video_path, float(clip.start_sec))
+
+
 def _earliest_in_window(
     marks: Sequence[tuple[int, float]],
     video_index: int,
@@ -253,14 +286,26 @@ def apply_play_end_to_clips(
     gemini_map = gemini_ends or {}
     scan = death_finder or find_first_death_sec
     out: list[ScriptClip] = []
+    dropped = 0
     for clip in clips:
+        path = None
+        if video_paths is not None and 0 <= int(clip.video_index) < len(video_paths):
+            path = video_paths[int(clip.video_index)]
+        if path is not None and clip_opens_on_death_screen(clip, path):
+            dropped += 1
+            logger.info(
+                "play_end: drop video=%s kill=%.2f — cut opens on a death/spectator screen",
+                clip.video_index,
+                float(clip.kill_timestamp_sec),
+            )
+            continue
         last_kill = float(clip.kill_timestamp_sec)
         recipe = str(clip.recipe or "clean")
         cap = recipe_max_post_sec(recipe, cfg)
         death_sec: float | None = None
-        if video_paths is not None and 0 <= int(clip.video_index) < len(video_paths):
+        if path is not None:
             death_sec = scan(
-                video_paths[int(clip.video_index)],
+                path,
                 last_kill + _MIN_POST_SEC,
                 last_kill + cap,
                 sample_fps=float(cfg.sample_fps),
@@ -290,7 +335,21 @@ def apply_play_end_to_clips(
         )
         # Never extend past the already-planned source end.
         play_end = min(play_end, float(clip.end_sec))
-        out.append(apply_source_and_output_end(clip, play_end_src=play_end, cfg=cfg))
+        trimmed = apply_source_and_output_end(clip, play_end_src=play_end, cfg=cfg)
+        settle = output_settle_sec(trimmed)
+        if settle + 1e-9 < MIN_KEEP_SETTLE_SEC:
+            dropped += 1
+            logger.info(
+                "play_end: drop video=%s kill=%.2f — post-kill settle %.2fs < %.2fs",
+                clip.video_index,
+                last_kill,
+                settle,
+                MIN_KEEP_SETTLE_SEC,
+            )
+            continue
+        out.append(trimmed)
+    if dropped:
+        logger.info("play_end: dropped %d/%d clips that had no hold after the kill", dropped, len(clips))
     # Assembler concatenates by slot duration (ignores absolute gaps), so close the
     # bed. Kill accents slide with the clip — gameplay end wins over bar lock.
     return repack_output_timeline(out)

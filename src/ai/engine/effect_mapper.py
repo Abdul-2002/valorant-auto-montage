@@ -47,7 +47,8 @@ _PHASE_ROTATION: dict[str, tuple[str, ...]] = {
     "outro": ("slow", "cinematic"),
 }
 # Output seconds of post-kill slow-mo and its speed, per recipe.
-_SLOWMO_OUT_SEC: dict[str, float] = {"slow": 0.9, "cinematic": 1.2}
+# Keep holds short — long slow/punch windows drag the cut.
+_SLOWMO_OUT_SEC: dict[str, float] = {"slow": 0.55, "cinematic": 0.75}
 _SLOWMO_FACTOR_CLIMAX: float = 0.4
 _SLOWMO_FACTOR_DEFAULT: float = 0.45
 
@@ -131,9 +132,35 @@ def assign_glitter_variants(n: int) -> list[str]:
     return [GLITTER_CYCLE[i % len(GLITTER_CYCLE)] for i in range(n)]
 
 
-def slowmo_params(*, recipe: str, arc_phase: str) -> tuple[float, float]:
+def _snap_to_beats(duration_sec: float, beat_sec: float | None) -> float:
+    """Hold slow-mo for whole beats so the exit lands on the grid."""
+    if duration_sec <= 0.0 or beat_sec is None or float(beat_sec) <= 1e-9:
+        return float(duration_sec)
+    beat = float(beat_sec)
+    return max(1, int(round(float(duration_sec) / beat))) * beat
+
+
+def playback_speeds(*, recipe: str, arc_phase: str) -> tuple[float, float]:
+    """(approach, exit) in source-seconds per output-second.
+
+    Real time is the default so the tail after a slow hold does not stay fast.
+    A punch is the only recipe that runs hot, and only slightly.
+    """
+    if str(recipe) == "punch":
+        if str(arc_phase) == "climax":
+            return 1.2, 1.25
+        return 1.15, 1.2
+    return 1.0, 1.0
+
+
+def slowmo_params(
+    *,
+    recipe: str,
+    arc_phase: str,
+    beat_sec: float | None = None,
+) -> tuple[float, float]:
     """(post-kill slow-mo output seconds, speed factor) before the source-fps cap."""
-    duration = _SLOWMO_OUT_SEC.get(recipe, 0.0)
+    duration = _snap_to_beats(_SLOWMO_OUT_SEC.get(recipe, 0.0), beat_sec)
     climactic = recipe == "cinematic" or arc_phase == "climax"
     return duration, (_SLOWMO_FACTOR_CLIMAX if climactic else _SLOWMO_FACTOR_DEFAULT)
 
@@ -178,7 +205,8 @@ def _reference_extras(recipe: str, score: float) -> dict[str, Any]:
         extras["motion_blur"] = MotionBlurEffectConfig(enabled=True, duration_sec=0.2, amount_px=24)
     if recipe == "cinematic":
         extras["lens_distort"] = LensDistortEffectConfig(enabled=True)
-    if recipe == "cinematic" or (recipe == "slow" and score >= 0.65):
+    # Gate bloom hard — washout on every slow kill reads as a filter pack, not an edit.
+    if recipe == "cinematic" or (recipe == "slow" and score > 0.8):
         extras["highlight_bloom"] = HighlightBloomEffectConfig(enabled=True)
     return extras
 
@@ -195,14 +223,20 @@ def map_effects(
     pip_style: str = "",
     glitter_variant: str = "",
     glitter_seed: int = 0,
+    beat_sec: float | None = None,
 ) -> ScriptClipEffects:
     intensity = _intensity(creative_config=creative_config, brief=brief)
     preset = get_preset(str(inp.arc_phase), intensity)
-    slow_sec, default_factor = slowmo_params(recipe=recipe, arc_phase=str(inp.arc_phase))
+    slow_sec, default_factor = slowmo_params(
+        recipe=recipe, arc_phase=str(inp.arc_phase), beat_sec=beat_sec
+    )
+    approach, exit_speed = playback_speeds(recipe=recipe, arc_phase=str(inp.arc_phase))
     velocity = VelocityEffectConfig(
         enabled=True,
         kill_slowmo_duration_sec=slow_sec,
         kill_slowmo_factor=float(slowmo_factor if slowmo_factor is not None else default_factor),
+        approach_speed=approach,
+        exit_speed=exit_speed,
     )
     color_keys = set(ColorGradingEffectConfig.model_fields) - {"enabled"}
     # ~AE Brightness +100 at intensity 0.85 (Zishu kill flash), scaled by style intensity.

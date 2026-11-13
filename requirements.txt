@@ -20,6 +20,8 @@ Pillow>=10.0
 moviepy>=2.0.0
 imageio>=2.9.0
 imageio-ffmpeg>=0.4.0
+# NVDEC/NVENC Python bindings (optional at runtime; OpenCV fallback if missing)
+PyNvVideoCodec==2.2.4
 
 # AI / Detection (optional; used for YOLO Tier 2 detector)
 ultralytics>=8.3.0
@@ -32,6 +34,8 @@ scipy>=1.12.0
 # Music understanding (lyric / hook timing + structure)
 faster-whisper==1.2.1
 demucs==4.0.1
+# Demucs/torchaudio save path requires torchcodec on newer torch builds
+torchcodec==0.17.0
 all-in-one-infer==3.1.0
 
 # Config

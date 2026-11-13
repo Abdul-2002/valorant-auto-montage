@@ -2,6 +2,7 @@ import {
   composePreview,
   confirmRecommendations,
   createMontage,
+  createMontageFromPaths,
   getRecommendations,
   getScript,
   getStatus,
@@ -96,6 +97,30 @@ export async function runAiMontageMaker(
     density: opts.density,
     titleText: opts.titleText,
     songName: music.name.replace(/\.[^.]+$/, ""),
+    onProgress: opts.onProgress,
+  });
+}
+
+/** Mounted paths (D:\\Videos\\Valorant → /videos_ext) — symlink, no GB copy. */
+export async function runAiMontageFromPaths(
+  videos: string[],
+  music: string,
+  opts: {
+    density?: string;
+    titleText?: string;
+    onProgress?: AiMontageProgress;
+  } = {}
+): Promise<AiMontageResult> {
+  if (!videos.length) throw new Error("Select at least one mounted video.");
+  if (!music) throw new Error("Select a mounted song.");
+  opts.onProgress?.("Linking mounted media…", 3);
+  const { task_id } = await createMontageFromPaths(videos, music);
+  const songName = music.split("/").pop()?.replace(/\.[^.]+$/, "") || "song";
+  opts.onProgress?.("Queued detect (zero-copy)", 8);
+  return runAiMontageFromTask(task_id, {
+    density: opts.density,
+    titleText: opts.titleText,
+    songName,
     onProgress: opts.onProgress,
   });
 }

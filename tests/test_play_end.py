@@ -59,9 +59,23 @@ def test_should_end_clip_at_yolo_spectating_mark() -> None:
         [clip],
         cfg=PlayEndConfig(),
         death_finder=lambda *_a, **_k: None,
-        death_marks=[(0, 10.4)],
+        death_marks=[(0, 11.2)],
     )
-    assert abs(trimmed[0].end_sec - (10.4 - PlayEndConfig().death_pad_sec)) < 1e-6
+    assert abs(trimmed[0].end_sec - (11.2 - PlayEndConfig().death_pad_sec)) < 1e-6
+
+
+def test_should_drop_clip_when_death_leaves_no_hold() -> None:
+    clip = _clip(start=8.0, end=14.0, last_kill=10.0, out_start=0.0, out_end=6.0, kill_out=2.0, recipe="slow")
+    kept = _clip(start=20.0, end=30.0, last_kill=24.0, out_start=8.0, out_end=16.0, kill_out=4.0, recipe="slow", video=1)
+    trimmed = apply_play_end_to_clips(
+        [clip, kept],
+        cfg=PlayEndConfig(),
+        death_finder=lambda *_a, **_k: None,
+        death_marks=[(0, 10.3)],
+    )
+    assert len(trimmed) == 1
+    assert trimmed[0].video_index == 1
+    assert trimmed[0].output_start_sec == 8.0
 
 
 def test_should_cut_before_death_when_earlier_than_cap() -> None:

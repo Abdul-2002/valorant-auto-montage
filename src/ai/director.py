@@ -102,7 +102,9 @@ def generate_montage_script(
 
     # Skip Gemini labeling when selection is locked (labels unused) or when it would
     # block compose on a bad/missing API key across dozens of uploads.
-    if not selection_locked:
+    if os.environ.get("MONTAGE_SKIP_PLAY_LABELS", "").strip() == "1":
+        log.info("director: play labeling skipped")
+    elif not selection_locked:
         try:
             labeled = label_play_groups(
                 labeled,

@@ -35,20 +35,27 @@ def detect_highlights_task(self, payload: dict[str, Any]) -> dict[str, Any]:
     self.update_state(state="PROGRESS", meta={"phase": "detecting", "progress": 0.15})
 
     from src.pipeline.highlight_detector import detect_highlights
+    from src.pipeline.gpu_hygiene import release_cuda
 
-    highlights = detect_highlights(
-        video_paths=[Path(p) for p in meta["videos"]],
-        config=config,
-        task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "detecting", "progress": p}),
-    )
+    try:
+        highlights = detect_highlights(
+            video_paths=[Path(p) for p in meta["videos"]],
+            config=config,
+            task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "detecting", "progress": p}),
+        )
 
-    out_path = tdir / "highlights.json"
-    out_path.write_text(json.dumps({"highlights": [h.model_dump(mode="json") for h in highlights]}, indent=2), encoding="utf-8")
+        out_path = tdir / "highlights.json"
+        out_path.write_text(
+            json.dumps({"highlights": [h.model_dump(mode="json") for h in highlights]}, indent=2),
+            encoding="utf-8",
+        )
 
-    self.update_state(state="PROGRESS", meta={"phase": "summarizing", "progress": 0.9, "task_id": task_id})
-    _remember_sources(task_id, config, meta)
+        self.update_state(state="PROGRESS", meta={"phase": "summarizing", "progress": 0.9, "task_id": task_id})
+        _remember_sources(task_id, config, meta)
 
-    return {"task_id": task_id, "phase": "review_ready", "progress": 1.0, "num_highlights": len(highlights)}
+        return {"task_id": task_id, "phase": "review_ready", "progress": 1.0, "num_highlights": len(highlights)}
+    finally:
+        release_cuda(reason="detect_highlights_task")
 
 
 @celery_app.task(bind=True)
@@ -197,20 +204,24 @@ def render_montage_task(self, payload: dict[str, Any]) -> dict[str, Any]:
     )
     script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
 
-    render_montage(
-        video_paths=[Path(p) for p in meta["videos"]],
-        music_path=music_for_render,
-        highlights=confirmed["highlights"],
-        config=config,
-        out_dir=out_dir,
-        script=script,
-        beat_map=beat_map,
-        song_title=music_src.stem if music_src is not None else "",
-        task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "rendering", "progress": p}),
-    )
-    _remember_outputs(detect_task_id, out_dir, meta)
+    try:
+        render_montage(
+            video_paths=[Path(p) for p in meta["videos"]],
+            music_path=music_for_render,
+            highlights=confirmed["highlights"],
+            config=config,
+            out_dir=out_dir,
+            script=script,
+            beat_map=beat_map,
+            song_title=music_src.stem if music_src is not None else "",
+            task_progress_cb=lambda p: self.update_state(state="PROGRESS", meta={"phase": "rendering", "progress": p}),
+        )
+        _remember_outputs(detect_task_id, out_dir, meta)
+        return {"detect_task_id": detect_task_id, "phase": "complete", "progress": 1.0, "outputs_dir": str(out_dir)}
+    finally:
+        from src.pipeline.gpu_hygiene import release_cuda
 
-    return {"detect_task_id": detect_task_id, "phase": "complete", "progress": 1.0, "outputs_dir": str(out_dir)}
+        release_cuda(reason="render_montage_task")
 
 
 def _remember_sources(task_id: str, config: AppConfig, meta: dict[str, Any]) -> None:

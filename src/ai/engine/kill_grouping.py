@@ -25,7 +25,8 @@ ROUND_MIN_KILLS: int = 2
 HOLD_SCORE: float = 0.73
 # Shorter holds pack more bursts into the song bed; finale still gets grown bars.
 HOLD_BARS: int = 2
-PUNCH_BARS: int = 1
+# One bar cannot hold ~1.5s pre-roll + post-kill settle; use two bars for punch singles.
+PUNCH_BARS: int = 2
 # Lead-in beats before the kill so the flick / crosshair placement is visible.
 PUNCH_PRE_BEATS: int = 3
 # Singles below this are filler even when the song bed still has room.

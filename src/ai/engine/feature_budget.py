@@ -10,6 +10,7 @@ look from the layered map/transition language in the Fiverr samples.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -17,7 +18,29 @@ PIP_STYLES: tuple[str, ...] = ("freeze_inset", "replay_inset")
 MAX_PIP = 4
 MAX_GHOST_CANDIDATES = 4
 MAX_GUN_OUTLINES = 5
+# Sparkle on every kill washes the picture — reserve for the finale + biggest plays.
+GLITTER_FRACTION: float = 0.35
 _GUN_RECIPES = frozenset({"slow", "cinematic"})
+
+
+def glitter_slots(*, kill_counts: Sequence[int], scores: Sequence[float]) -> set[int]:
+    """Indices that get glitter: finale first, then densest/highest-score plays, never neighbours."""
+    n = len(kill_counts)
+    if n == 0:
+        return set()
+    budget = max(1, math.ceil(GLITTER_FRACTION * n))
+    ranked = sorted(
+        range(n),
+        key=lambda i: (i == n - 1, int(kill_counts[i]), float(scores[i] if i < len(scores) else 0.0)),
+        reverse=True,
+    )
+    picked: list[int] = []
+    for i in ranked:
+        if len(picked) >= budget:
+            break
+        if all(abs(i - j) > 1 for j in picked):
+            picked.append(i)
+    return set(picked)
 
 
 @dataclass(frozen=True)

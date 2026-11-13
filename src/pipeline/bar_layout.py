@@ -37,9 +37,9 @@ BEATS_PER_BAR = 4
 _CHORUS_SECTIONS = frozenset({"chorus", "drop"})
 BARS_BY_SECTION: dict[str, int] = {"chorus": 2, "drop": 2, "inst": 2, "solo": 2}
 DEFAULT_BARS = 3
-MAX_BARS_PER_CLIP = 4
+MAX_BARS_PER_CLIP = 3
 # Finale rides the closing chorus/drop; allow a longer last spray on the beat drop.
-FINALE_MAX_BARS = 8
+FINALE_MAX_BARS = 6
 
 
 def bars_needed(demand: ClipDemand, beat_interval: float) -> int:

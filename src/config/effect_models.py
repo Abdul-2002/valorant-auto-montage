@@ -109,7 +109,7 @@ class GhostFreezeEffectConfig(BaseModel):
     # Top-left of the cut-out in output-frame pixels (where the enemy stood on the kill frame).
     anchor_x: int = Field(ge=0, default=0)
     anchor_y: int = Field(ge=0, default=0)
-    lead_sec: float = Field(gt=0.1, le=2.0, default=0.5)
+    lead_sec: float = Field(gt=0.1, le=2.0, default=0.35)
     max_alpha: float = Field(ge=0.1, le=1.0, default=0.55)
     outline_rgb: tuple[int, int, int] = (170, 230, 255)
 

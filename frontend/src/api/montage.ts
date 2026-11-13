@@ -111,6 +111,34 @@ export async function createMontage(
   return created;
 }
 
+export type MountedFile = {
+  name: string;
+  path: string;
+  size_bytes: number;
+};
+
+export type MountedMedia = {
+  videos: MountedFile[];
+  songs: MountedFile[];
+};
+
+/** List bind-mounted VODs/songs under /videos(_ext) and /songs(_ext). No byte copy. */
+export function listMountedMedia(): Promise<MountedMedia> {
+  return send("/montage/media/mounted");
+}
+
+/** Zero-copy create: symlink mounted paths, then enqueue detect. */
+export function createMontageFromPaths(
+  videos: string[],
+  music: string
+): Promise<{ task_id: string }> {
+  return send("/montage/create-from-paths", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videos, music }),
+  });
+}
+
 export function listTasks(): Promise<TaskListResponse> {
   return send("/montage/tasks");
 }

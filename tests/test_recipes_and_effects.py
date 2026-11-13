@@ -10,6 +10,8 @@ from src.ai.engine.effect_mapper import (
     assign_hit_styles,
     assign_recipes,
     map_effects,
+    playback_speeds,
+    slowmo_params,
 )
 from src.effects.edge_glow import edge_map, tritone
 from src.effects.envelopes import decay_envelope
@@ -149,8 +151,42 @@ def test_should_add_reference_accents_on_fast_recipes_when_reference_style() -> 
 
 def test_should_gate_bloom_on_score_for_slow_recipes_when_reference_style() -> None:
     assert _reference_effects("slow", score=0.9).highlight_bloom is not None
+    assert _reference_effects("slow", score=0.8).highlight_bloom is None
     assert _reference_effects("slow", score=0.4).highlight_bloom is None
     assert _reference_effects("clean").rgb_split is None
+
+
+def test_should_play_real_time_except_a_hot_punch() -> None:
+    assert playback_speeds(recipe="slow", arc_phase="build") == (1.0, 1.0)
+    assert playback_speeds(recipe="cinematic", arc_phase="climax") == (1.0, 1.0)
+    assert playback_speeds(recipe="clean", arc_phase="intro") == (1.0, 1.0)
+    approach, exit_speed = playback_speeds(recipe="punch", arc_phase="build")
+    assert approach == 1.15 and exit_speed == 1.2
+    climax = playback_speeds(recipe="punch", arc_phase="climax")
+    assert climax[0] > approach and climax[1] > exit_speed
+    slow = map_effects(
+        inp=EffectMappingInput(score=0.8, arc_phase="build"),
+        creative_config={},
+        brief=None,
+        recipe="slow",
+    )
+    assert slow.velocity.approach_speed == 1.0
+    assert slow.velocity.exit_speed == 1.0
+
+
+def test_should_hold_slowmo_for_whole_beats_when_beat_is_known() -> None:
+    assert slowmo_params(recipe="slow", arc_phase="build", beat_sec=0.75) == (0.75, 0.45)
+    cine, _ = slowmo_params(recipe="cinematic", arc_phase="climax", beat_sec=0.44)
+    assert abs(cine - 0.88) < 1e-9
+    assert slowmo_params(recipe="punch", arc_phase="build", beat_sec=0.75)[0] == 0.0
+    eff = map_effects(
+        inp=EffectMappingInput(score=0.8, arc_phase="build"),
+        creative_config={},
+        brief=None,
+        recipe="slow",
+        beat_sec=0.75,
+    )
+    assert eff.velocity.kill_slowmo_duration_sec == 0.75
 
 
 def test_should_favor_glow_hits_when_reference_style() -> None:

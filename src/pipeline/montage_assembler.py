@@ -342,6 +342,38 @@ def render_montage(
     if not selected:
         return
 
+    # P1: FFmpeg hard-cut+grade+NVENC when the script has no pixel FX / remaps.
+    mode = str(getattr(config.output, "assemble_mode", "auto") or "auto")
+    if script is not None and mode in ("auto", "ffmpeg"):
+        from src.pipeline.ffmpeg_assemble import assemble_hard_cuts_ffmpeg, can_use_ffmpeg_assemble
+
+        if mode == "ffmpeg" or can_use_ffmpeg_assemble(script):
+            if can_use_ffmpeg_assemble(script):
+                master = out_dir / "montage_16x9.mp4"
+                assemble_hard_cuts_ffmpeg(
+                    video_paths=video_paths,
+                    music_path=music_path,
+                    script=script,
+                    config=config,
+                    out_path=master,
+                    work_dir=out_dir / "ffmpeg_work",
+                )
+                if "9:16" in (config.output.formats or []):
+                    from src.io.ffmpeg import crop_center_9x16_from_16x9
+
+                    crop_center_9x16_from_16x9(
+                        master,
+                        out_dir / "montage_9x16.mp4",
+                        codec=str(config.output.codec),
+                        fps=fps,
+                        video_bitrate=str(config.output.vertical_bitrate),
+                    )
+                if task_progress_cb is not None:
+                    task_progress_cb(1.0)
+                return
+            if mode == "ffmpeg":
+                logger.warning("assembler: assemble_mode=ffmpeg but script needs MoviePy FX; falling back")
+
     decoders = DecoderPool()
     try:
         clips: list[Any] = []

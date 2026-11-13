@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from src.ai.engine.effect_mapper import EffectMappingInput, map_effects, slowmo_params
+from src.ai.engine.effect_mapper import EffectMappingInput, map_effects, playback_speeds, slowmo_params
 from src.ai.engine.kill_grouping import KillGroup
 from src.ai.schema import CreativeBrief, ScriptClip
 from src.config.models import VelocityEffectConfig
@@ -33,8 +33,13 @@ def build_script_clip(
     velocity: VelocityEffectConfig,
     creative_config: dict,
     brief: CreativeBrief | None,
+    beat_sec: float | None = None,
 ) -> ScriptClip:
-    slow_sec, target_factor = slowmo_params(recipe=direction.recipe, arc_phase=direction.arc_phase)
+    slow_sec, target_factor = slowmo_params(
+        recipe=direction.recipe,
+        arc_phase=direction.arc_phase,
+        beat_sec=beat_sec,
+    )
     factor = slowmo_factor_for_source(
         target=target_factor,
         source_fps=group.source_fps,
@@ -45,17 +50,26 @@ def build_script_clip(
         requested_factor=target_factor,
         applied_factor=factor,
     )
+    from src.ai.engine.pacing import MAX_PRE_ROLL_SEC, cap_pre_roll
+
     kill_out_rel = [float(k) - plan.output_start_sec for k in plan.kill_output_sec]
+    kill_out_rel, out_duration = cap_pre_roll(
+        kill_out_rel=kill_out_rel,
+        out_duration=float(plan.duration_sec),
+        max_pre_sec=float(MAX_PRE_ROLL_SEC),
+        beat_sec=beat_sec,
+    )
     video_end = group.video_duration_sec if group.video_duration_sec > 0 else math.inf
+    approach, exit_speed = playback_speeds(recipe=direction.recipe, arc_phase=direction.arc_phase)
     remap = build_clip_remap(
-        out_duration=plan.duration_sec,
+        out_duration=out_duration,
         kill_out=kill_out_rel,
         kill_src=group.kill_secs,
         src_bounds=(0.0, video_end),
-        approach_speed=float(velocity.approach_speed),
+        approach_speed=approach,
         slowmo_out=slow_sec,
         slowmo_factor=factor,
-        exit_speed=float(velocity.exit_speed),
+        exit_speed=exit_speed,
     )
     effects = map_effects(
         inp=EffectMappingInput(score=group.score, arc_phase=direction.arc_phase),
@@ -68,6 +82,7 @@ def build_script_clip(
         pip_style=direction.pip_style,
         glitter_variant=direction.glitter_variant,
         glitter_seed=group.video_index * 100_003 + int(round(group.kill_secs[-1] * 1000)),
+        beat_sec=beat_sec,
     )
     return ScriptClip(
         video_index=group.video_index,
@@ -77,7 +92,7 @@ def build_script_clip(
         kill_timestamps_sec=list(group.kill_secs),
         score=min(1.0, group.score),
         output_start_sec=plan.output_start_sec,
-        output_end_sec=plan.output_end_sec,
+        output_end_sec=float(plan.output_start_sec) + float(out_duration),
         kill_output_times_sec=kill_out_rel,
         time_knots=remap.knots,
         recipe=direction.recipe,

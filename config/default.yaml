@@ -1,6 +1,8 @@
 output:
   # Multi-VOD Zishu-length target (~1–1.5 min). Needs enough kills across sources.
   target_duration_sec: 90
+  # auto: FFmpeg hard-cut path when eligible; otherwise MoviePy FX path.
+  assemble_mode: "auto"
   formats: ["16:9", "9:16"]
   resolution: "1920x1080"
   fps: 60
@@ -236,7 +238,7 @@ detection:
 
   gemini_kill_verify:
     # Layer B: accept/reject YOLO (or Gemini) kill candidates via short-clip VLM.
-    enabled: true
+    enabled: false
     model: "gemini-2.5-flash-lite"
     # On 429, rotate to the next model (quotas are per-model on free tier).
     fallback_models:

@@ -15,8 +15,11 @@ from src.effects.text_sprites import composite
 def _with_outline(rgba: np.ndarray, rgb: tuple[int, int, int]) -> np.ndarray:
     """Add a soft glowing rim around the cut-out so the ghost reads against busy maps."""
     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-    rim = cv2.dilate(alpha, np.ones((5, 5), np.uint8)) - alpha
-    rim = np.clip(cv2.GaussianBlur(rim, (0, 0), 2.0) * 2.0, 0.0, 1.0)
+    # Soft exterior band from distance transform — avoids hard dilated pixel stairs.
+    outside = cv2.distanceTransform((alpha < 0.05).astype(np.uint8), cv2.DIST_L2, 3)
+    rim = np.clip(1.0 - (outside / 4.0), 0.0, 1.0)
+    rim = rim * (1.0 - alpha)
+    rim = np.clip(cv2.GaussianBlur(rim, (0, 0), 1.2) * 1.6, 0.0, 1.0)
     out = rgba.astype(np.float32)
     tint = np.asarray(rgb, dtype=np.float32)
     out[:, :, :3] = out[:, :, :3] * (1.0 - rim[..., None]) + tint * rim[..., None]

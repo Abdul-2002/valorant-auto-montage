@@ -26,35 +26,78 @@ export function Shell() {
   useEffect(() => {
     if (!workspace) return;
 
+    /** Auto-hide delay after edge-peek so studio toolbar stays usable. */
+    const HIDE_MS = 4500;
+    /** Leave the top strip before auto-hide can fire. */
+    const LEAVE_Y = 56;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
     let lastY = window.scrollY;
+
+    const clearHideTimer = () => {
+      if (hideTimer !== null) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    };
+
+    const scheduleHide = () => {
+      clearHideTimer();
+      hideTimer = setTimeout(() => setChromeHidden(true), HIDE_MS);
+    };
+
+    const reveal = () => {
+      setChromeHidden(false);
+      scheduleHide();
+    };
+
     const onScroll = () => {
       const y = window.scrollY;
       if (y < 8) {
-        setChromeHidden(false);
+        reveal();
       } else if (y > lastY + 4) {
+        clearHideTimer();
         setChromeHidden(true);
       } else if (y < lastY - 4) {
-        setChromeHidden(false);
+        reveal();
       }
       lastY = y;
     };
 
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < -6) setChromeHidden(false);
-      if (e.deltaY > 6) setChromeHidden(true);
+      if (e.deltaY < -6) reveal();
+      if (e.deltaY > 6) {
+        clearHideTimer();
+        setChromeHidden(true);
+      }
     };
 
     const onMove = (e: MouseEvent) => {
-      if (e.clientY <= 10) setChromeHidden(false);
+      if (e.clientY <= 10) {
+        reveal();
+        return;
+      }
+      // Cursor left the top strip — hide on schedule (do not cancel if already open).
+      if (e.clientY > LEAVE_Y && hideTimer === null) {
+        scheduleHide();
+      }
     };
+
+    const onTopbarEnter = () => clearHideTimer();
+    const onTopbarLeave = () => scheduleHide();
 
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("mousemove", onMove, { passive: true });
+    const bar = document.querySelector(".shell-workspace .topbar");
+    bar?.addEventListener("mouseenter", onTopbarEnter);
+    bar?.addEventListener("mouseleave", onTopbarLeave);
     return () => {
+      clearHideTimer();
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("mousemove", onMove);
+      bar?.removeEventListener("mouseenter", onTopbarEnter);
+      bar?.removeEventListener("mouseleave", onTopbarLeave);
     };
   }, [workspace]);
 

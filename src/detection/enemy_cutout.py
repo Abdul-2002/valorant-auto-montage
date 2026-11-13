@@ -2,7 +2,7 @@
 
 On a kill the enemy is normally under the crosshair (screen center). A single
 center point is brittle; we try a small multi-point cluster + a tight center
-box, then reject masks that fail size / position checks.
+box, then reject masks that fail size / position / compactness checks.
 """
 
 from __future__ import annotations
@@ -11,14 +11,16 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
+
+from src.cv.mask_refine import cleanup_mask
 
 log = logging.getLogger(__name__)
 
 MASK_AREA_RANGE = (0.0015, 0.12)
 MAX_CENTROID_DIST_FRAC = 0.14  # of frame height
-SAMPLE_OFFSETS_SEC = (0.03, 0.08, 0.14)
+# Sample earlier so the enemy is still standing (post-death floor grabs fail).
+SAMPLE_OFFSETS_SEC = (0.08, 0.16, 0.28)
 _PAD_PX = 12
 # Fractional offsets from center for multi-point prompts (positive labels).
 _CROSSHAIR_POINT_OFFSETS = (
@@ -28,7 +30,12 @@ _CROSSHAIR_POINT_OFFSETS = (
     (0.0, 0.018),
     (0.0, -0.018),
 )
-_CENTER_BOX_FRAC = 0.08  # half-width/height of the center prompt box
+# Half-width/height of the center prompt box (tighter than the old 0.08).
+_CENTER_BOX_FRAC = 0.05
+# Reject if morph+CC drops more than this fraction of the raw mask (speckles).
+_MIN_KEEP_FRAC = 0.65
+# Reject elongated ground strips (bbox long/short).
+_MAX_BBOX_ASPECT = 2.2
 
 
 class CutoutError(RuntimeError):
@@ -52,6 +59,16 @@ def load_sam(model_path: Path):
     return model
 
 
+def _bbox_aspect(mask: np.ndarray) -> float:
+    ys, xs = np.nonzero(mask)
+    if xs.size == 0:
+        return 0.0
+    bw = float(xs.max() - xs.min() + 1)
+    bh = float(ys.max() - ys.min() + 1)
+    short = max(1.0, min(bw, bh))
+    return max(bw, bh) / short
+
+
 def _valid(mask: np.ndarray) -> bool:
     h, w = mask.shape
     area = float(mask.mean())
@@ -59,8 +76,26 @@ def _valid(mask: np.ndarray) -> bool:
         return False
     if mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any():
         return False
+    if _bbox_aspect(mask) > _MAX_BBOX_ASPECT:
+        return False
     ys, xs = np.nonzero(mask)
     return float(np.hypot(xs.mean() - w / 2, ys.mean() - h / 2)) <= MAX_CENTROID_DIST_FRAC * h
+
+
+def refine_enemy_mask(mask: np.ndarray) -> np.ndarray | None:
+    """Cleanup SAM output and reject speckly / elongated / off-center masks."""
+    raw = np.asarray(mask).astype(bool)
+    if not raw.any():
+        return None
+    cleaned = cleanup_mask(raw)
+    if not cleaned.any():
+        return None
+    keep = float(cleaned.sum()) / float(raw.sum())
+    if keep < _MIN_KEEP_FRAC:
+        return None
+    if not _valid(cleaned):
+        return None
+    return cleaned
 
 
 def _pick_best_mask(
@@ -70,10 +105,15 @@ def _pick_best_mask(
     if masks.size == 0:
         return None
     conf = scores if scores is not None and len(scores) == len(masks) else np.ones(len(masks))
-    valid = [i for i in range(len(masks)) if _valid(masks[i])]
-    if not valid:
+    refined: list[tuple[int, np.ndarray]] = []
+    for i in range(len(masks)):
+        out = refine_enemy_mask(masks[i])
+        if out is not None:
+            refined.append((i, out))
+    if not refined:
         return None
-    return masks[max(valid, key=lambda i: float(conf[i]))]
+    _best_i, best_mask = max(refined, key=lambda pair: float(conf[pair[0]]))
+    return best_mask
 
 
 def _run_point_prompt(model, bgr: np.ndarray, points: list[list[int]]) -> np.ndarray | None:
@@ -113,26 +153,24 @@ def best_enemy_mask(model, frame_rgb: np.ndarray) -> np.ndarray | None:
     return _run_box_prompt(model, bgr, box)
 
 
-def to_cutout(frame_rgb: np.ndarray, mask: np.ndarray) -> Cutout:
+def to_cutout(frame_rgb: np.ndarray, mask: np.ndarray, *, feather_radius_px: float = 4.0) -> Cutout:
+    from src.cv.mask_refine import feather_mask_alpha
+
     ys, xs = np.nonzero(mask)
     h, w = mask.shape
     x0, y0 = max(0, xs.min() - _PAD_PX), max(0, ys.min() - _PAD_PX)
     x1, y1 = min(w, xs.max() + _PAD_PX + 1), min(h, ys.max() + _PAD_PX + 1)
-    alpha = cv2.GaussianBlur(mask[y0:y1, x0:x1].astype(np.float32), (0, 0), 1.2)
+    # Distance-transform feather (not a thin Gaussian on a hard bit mask) kills
+    # stair-step edges on ghost cut-outs under motion blur / scale.
+    alpha = feather_mask_alpha(mask[y0:y1, x0:x1], radius_px=float(feather_radius_px))
     rgba = np.dstack([frame_rgb[y0:y1, x0:x1], (alpha * 255.0).astype(np.uint8)])
     return Cutout(rgba=rgba, x=int(x0), y=int(y0))
 
 
 def read_frame_rgb(video_path: Path, t_sec: float, size: tuple[int, int]) -> np.ndarray | None:
-    cap = cv2.VideoCapture(str(video_path))
-    try:
-        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec) * 1000.0)
-        ok, bgr = cap.read()
-    finally:
-        cap.release()
-    if not ok or bgr is None:
-        return None
-    return cv2.cvtColor(cv2.resize(bgr, size, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+    from src.io.nv_decode import read_rgb_frame_at
+
+    return read_rgb_frame_at(Path(video_path), t_sec=float(t_sec), size=size)
 
 
 def enemy_cutout_at_kill(model, video_path: Path, kill_sec: float, size: tuple[int, int]) -> Cutout | None:

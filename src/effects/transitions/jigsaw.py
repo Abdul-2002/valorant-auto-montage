@@ -99,7 +99,9 @@ def build_pieces(frame_b: np.ndarray, labels: np.ndarray) -> list[Piece]:
         ys, xs = np.nonzero(mask)
         x0, y0 = max(0, int(xs.min()) - _PAD_PX), max(0, int(ys.min()) - _PAD_PX)
         x1, y1 = min(w, int(xs.max()) + 1 + _PAD_PX), min(h, int(ys.max()) + 1 + _PAD_PX)
-        alpha = cv2.GaussianBlur(mask[y0:y1, x0:x1].astype(np.float32), (0, 0), _FEATHER_SIGMA)
+        from src.cv.mask_refine import feather_mask_alpha
+
+        alpha = feather_mask_alpha(mask[y0:y1, x0:x1], radius_px=max(1.5, float(_FEATHER_SIGMA) * 2.0))
         dx, dy = entry_offset(mask, from_bottom=label == WEAPON_LABEL)
         pieces.append(Piece(frame_b[y0:y1, x0:x1].copy(), alpha, x0, y0, dx, dy))
     return pieces

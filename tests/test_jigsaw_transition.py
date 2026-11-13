@@ -160,7 +160,13 @@ def test_should_preserve_frames_and_converge_to_incoming_when_styling_tail() -> 
 def test_should_pick_scene_jigsaws_off_flash_and_apart_from_other_jigsaws() -> None:
     kinds = ["hard_cut", "push", "flash_white", "hard_cut", "hard_cut", "jigsaw"]
     sources = [(k, 10.0) for k in range(7)]
-    assert scene_jigsaw_slots(kinds, sources) == {0, 3}
+    assert scene_jigsaw_slots(kinds, sources, max_slots=2) == {0, 3}
+
+
+def test_should_add_only_one_scene_jigsaw_by_default() -> None:
+    kinds = ["hard_cut", "push", "flash_white", "hard_cut", "hard_cut", "jigsaw"]
+    sources = [(k, 10.0) for k in range(7)]
+    assert scene_jigsaw_slots(kinds, sources) == {0}
 
 
 def test_should_skip_scene_jigsaw_when_next_kill_is_same_round() -> None:
@@ -204,7 +210,7 @@ def test_should_never_stack_a_rotation_jigsaw_before_the_finale_jigsaw() -> None
     assert kinds[-2] != "jigsaw"
 
 
-def test_should_jigsaw_holds_and_multis_only_and_cap_scene_jigsaws_at_two() -> None:
+def test_should_jigsaw_into_the_biggest_play_once_plus_the_finale() -> None:
     sources = [(i, 0.0) for i in range(6)]
     ranks = [0, 1, 0, 2, 0, 2]
     plan = plan_transitions(
@@ -217,9 +223,10 @@ def test_should_jigsaw_holds_and_multis_only_and_cap_scene_jigsaws_at_two() -> N
         jigsaw_ranks=ranks,
     )
     kinds = [t.type for t in plan.transitions_to_next[:-1]]
-    assert kinds[1] != "jigsaw"
-    assert kinds[3] != "jigsaw"
-    assert {i for i, k in enumerate(kinds) if k == "jigsaw"} == {0, 2, 4}
+    assert {i for i, k in enumerate(kinds) if k == "jigsaw"} == {2, 4}
+
+
+def test_should_never_put_jigsaws_on_neighbouring_cuts_even_around_a_multi_kill() -> None:
     before_finale = plan_transitions(
         num_clips=4,
         beat_map=None,
@@ -230,8 +237,8 @@ def test_should_jigsaw_holds_and_multis_only_and_cap_scene_jigsaws_at_two() -> N
         jigsaw_ranks=[0, 0, 2, 2],
     )
     into = [t.type for t in before_finale.transitions_to_next[:-1]]
-    assert into[1] == "jigsaw"
     assert into[2] == "jigsaw"
+    assert into[1] != "jigsaw"
 
 
 def test_should_promote_gun_shaped_segment_in_weapon_box_when_prompt_fails() -> None:

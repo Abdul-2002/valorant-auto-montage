@@ -29,6 +29,9 @@ tmp_*
 codebase_dump.txt
 editing_sfx/
 
+# one-off debug / rerender scratch (never commit)
+scripts/_*
+
 # accidental template / shell expansion junk
 {{*}}
 

@@ -1,4 +1,20 @@
-from src.ai.engine.feature_budget import MAX_GHOST_CANDIDATES, MAX_PIP, assign_features
+import math
+
+from src.ai.engine.feature_budget import GLITTER_FRACTION, MAX_GHOST_CANDIDATES, MAX_PIP, assign_features, glitter_slots
+
+
+def test_should_glitter_the_finale_and_biggest_plays_but_not_neighbours() -> None:
+    kill_counts = [1, 1, 3, 1, 2, 1, 1, 1, 1, 2]
+    slots = glitter_slots(kill_counts=kill_counts, scores=[0.8] * len(kill_counts))
+    assert 9 in slots
+    assert 2 in slots
+    assert len(slots) <= math.ceil(GLITTER_FRACTION * len(kill_counts))
+    ordered = sorted(slots)
+    assert all(b - a > 1 for a, b in zip(ordered, ordered[1:]))
+
+
+def test_should_glitter_nothing_when_there_are_no_clips() -> None:
+    assert glitter_slots(kill_counts=[], scores=[]) == set()
 
 
 def test_should_put_pip_on_some_slow_singles_and_ghosts_on_others() -> None:

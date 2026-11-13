@@ -35,6 +35,8 @@ class OutputConfig(BaseModel):
     # fixed: pack/fill toward target_duration_sec.
     # clip_driven: curate plays first; bed length = natural bar needs (target is a soft ceiling).
     duration_mode: Literal["fixed", "clip_driven"] = "fixed"
+    # moviepy: full FX path. ffmpeg: hard-cut+grade+NVENC when eligible. auto: prefer ffmpeg.
+    assemble_mode: Literal["auto", "moviepy", "ffmpeg"] = "auto"
     formats: list[Literal["16:9", "9:16"]] = Field(default_factory=lambda: ["16:9", "9:16"])
     resolution: str = Field(default="1920x1080")
     fps: int = Field(ge=24, le=240, default=60)
